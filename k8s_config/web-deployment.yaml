@@ -24,6 +24,9 @@ spec:
         labelSelector:
           matchLabels:
             app: overwatch-web
+        # Spread each rollout's own pods: without this the old, terminating
+        # pods count too, and both new ones landed on the same node.
+        matchLabelKeys: ["pod-template-hash"]
       # Stateless, so off brick2000 (the storage node) when the other workers
       # can take them; soft, so they still run there if one is down.
       affinity:
@@ -44,7 +47,7 @@ spec:
           type: RuntimeDefault
       containers:
       - name: web
-        image: whitepatrick/overwatch:0.2.0
+        image: whitepatrick/overwatch:0.3.0
         imagePullPolicy: IfNotPresent
         args: ["web"]
         ports:

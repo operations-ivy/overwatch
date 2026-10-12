@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from overwatch.watch import Watch, classify, uuid16
+from overwatch.watch import Watch, classify, describe, uuid16
 
 
 class ClassifyTests(unittest.TestCase):
@@ -87,3 +87,41 @@ class WatchTests(unittest.TestCase):
         self.assertNotIn("56:78", state)
         # Nor even the salted id: only counts per kind.
         self.assertNotIn(self.w._key("F0:12:34:56:78:9A"), state)
+
+
+class DescribeTests(unittest.TestCase):
+    def test_find_my_battery_and_makers(self):
+        d = describe("findmy", None, {0x004C: bytes([0x12, 0x19, 0b10_000000]) + b"\x00" * 22}, [], {})
+        self.assertEqual((d["battery"], d["makers"]), ("low", ["Apple"]))
+
+    def test_google_tag_away_from_its_owner(self):
+        self.assertEqual(describe("googletag", None, {}, [], {uuid16(0xFEAA): b"\x41k"})["mode"], "away from its owner")
+        self.assertEqual(describe("googletag", None, {}, [], {uuid16(0xFEAA): b"\x40k"})["mode"], "near its owner")
+
+    def test_names_services_and_power(self):
+        d = describe("flipper", "Flipper Zorbo", {0x9999: b"x"}, [uuid16(0x3082), uuid16(0x1234)], {}, tx_power=4)
+        self.assertEqual(d["name"], "Flipper Zorbo")
+        self.assertEqual(d["tx_power"], 4)
+        self.assertEqual(d["makers"], ["0x9999"])
+        self.assertEqual(d["services"], ["0x1234", "Flipper-like (0x3082)"])
+
+    def test_no_raw_payloads(self):
+        key = bytes(range(30, 52))
+        d = describe("findmy", None, {0x004C: bytes([0x12, 0x19, 0]) + key}, [], {})
+        self.assertNotIn(key.hex(), json.dumps(d))
+        self.assertEqual(set(d), {"makers", "battery"})
+
+
+class DeviceDetailTests(unittest.TestCase):
+    def test_each_device_is_numbered_with_its_signal_range_and_advert_count(self):
+        w = Watch(started=0)
+        w.advert("F0:12:34:56:78:9A", "tile", -80, now=0, details={"makers": ["0x00ED"]}, address_type="random")
+        w.advert("F0:12:34:56:78:9A", "tile", -60, now=5)
+        w.advert("BB", "tile", -90, now=6)
+        devices = w.get(now=6)["kinds"][0]["devices"]
+        self.assertEqual([d["n"] for d in devices], [1, 2])  # strongest first
+        first = devices[0]
+        self.assertEqual((first["rssi"], first["rssi_min"], first["rssi_max"]), (-60, -80, -60))
+        self.assertEqual((first["first"], first["last"], first["adverts"]), (0, 5, 2))
+        self.assertEqual((first["address_type"], first["makers"]), ("random", ["0x00ED"]))
+        self.assertNotIn("F0:12", json.dumps(w.get(now=6)))

@@ -37,8 +37,13 @@ Laid out like wigle-console and the chuck reader (same palette and fonts):
   alert, scanner down or no signal;
 - tiles for trackers and gadgets nearby, alerts in the last 30 minutes, and
   whether it's still learning;
-- each kind nearby: how many, how many is usual, how close the nearest one
-  is, and a verdict (usual, above usual, unsure, learning);
+- each kind nearby, with its maker's icon: how many, how many is usual, how
+  close the nearest one is, and a verdict (usual, above usual, unsure,
+  learning). A row opens to a card per device: signal now and its range,
+  how long it's been here, when it was last heard, adverts and their rate,
+  address type (a random address rotates), and what the advert itself says
+  (name, TX power, maker data, services, a Find My tag's battery, whether a
+  Google tag is away from its owner). Open rows stay open across updates.
 - the last half hour's alerts. A new one flashes the header for a minute.
 
 It's live: nothing polls. Each advert that changes what the page shows is
@@ -87,8 +92,9 @@ scanner), `OVERWATCH_SCANNER_URL` (web).
 ### Privacy
 
 - Device addresses never leave the scanner process: each is hashed with a
-  per-start salt to tell devices apart, and only counts and the closest
-  signal per kind reach `/api/state`.
+  per-start salt to tell devices apart. The page numbers devices ("Device
+  3") instead. No key material or raw payloads leave it either, only
+  decoded fields (`describe` in `overwatch/watch.py`).
 - Nothing is stored. A restart forgets everything and learns the house again.
 
 ### The host
@@ -97,6 +103,18 @@ The scanner node needs bluetoothd running with the radio unblocked
 (Raspberry Pi OS starts radios blocked): `sudo rfkill unblock bluetooth`,
 which systemd-rfkill then keeps. Check with `bluetoothctl show` (`Powered:
 yes`). To listen somewhere else, change the scanner's `nodeSelector`.
+
+## Icons
+
+Inlined in the page, no requests at run time:
+
+- brand marks (Apple, Samsung, Tile, Google, Meta, Bluetooth):
+  [Simple Icons](https://simpleicons.org) 16.33.0, CC0. They're the
+  companies' trademarks, used only to name their devices;
+- the dolphin (Flipper): "Dolphin" by Delapouite,
+  [game-icons.net](https://game-icons.net), CC BY 3.0;
+- the chip (serial modules): [Lucide](https://lucide.dev) 1.48.0
+  `microchip`, ISC.
 
 ## Develop
 

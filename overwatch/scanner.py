@@ -22,9 +22,17 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .hub import Hub, stream
-from .watch import Watch, classify
+from .watch import Watch, classify, describe
 
 log = logging.getLogger(__name__)
+
+
+def address_type(device) -> str:
+    """public or random (a rotating, private address), from BlueZ's properties."""
+    try:
+        return str(device.details["props"].get("AddressType", ""))
+    except (AttributeError, KeyError, TypeError):
+        return ""
 
 
 def state(watch: Watch) -> dict:
@@ -39,9 +47,11 @@ def scan_forever(watch: Watch, hub: Hub, retry_seconds: float = 30) -> None:
     from bleak import BleakScanner
 
     def on_advert(device, adv) -> None:
-        kind = classify(adv.local_name, dict(adv.manufacturer_data), list(adv.service_uuids), dict(adv.service_data))
+        mfr, services, sdata = dict(adv.manufacturer_data), list(adv.service_uuids), dict(adv.service_data)
+        kind = classify(adv.local_name, mfr, services, sdata)
         if kind:
-            watch.advert(device.address, kind, adv.rssi)
+            details = describe(kind, adv.local_name, mfr, services, sdata, adv.tx_power)
+            watch.advert(device.address, kind, adv.rssi, details=details, address_type=address_type(device))
             hub.publish(state(watch))
 
     async def scan() -> None:

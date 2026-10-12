@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: overwatch-web
+  namespace: overwatch
+spec:
+  ingressClassName: traefik
+  rules:
+  # Served through brick9000's proxy (brick-cicd-config).
+  - host: overwatch.brick.nozdormu.cloud
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: overwatch-web
+            port:
+              number: 80

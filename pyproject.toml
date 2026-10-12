@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "overwatch"
+version = "0.1.0"
+description = "Watch Bluetooth LE around the house for trackers and surveillance gadgets"
+authors = ["Patrick White <whitep@alumni.vcu.edu>"]
+packages = [{ include = "overwatch" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+bleak = "^1.1.0"
+
+[tool.poetry.group.dev.dependencies]
+pre-commit = "^4.2.0"
+pytest = "^8.3.5"
+
+[build-system]
+requires = ["poetry>=1.3.2"]
+build-backend = "poetry.masonry.api"

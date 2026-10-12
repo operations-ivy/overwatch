@@ -1,0 +1,75 @@
+# The scanner: one pod, on the node whose radio should listen (brick1982, by
+# the kiosk). It's a place, not a replica, so there's exactly one and a
+# rollout stops the old pod before starting the new one. It reaches the host's
+# bluetoothd through the D-Bus system socket and needs no privileges.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: overwatch-scanner
+  namespace: overwatch
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: overwatch-scanner
+  template:
+    metadata:
+      labels:
+        app: overwatch-scanner
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: brick1982
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534  # nobody: the host's D-Bus needs a uid it knows (Dockerfile)
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: scanner
+        image: whitepatrick/overwatch:0.1.0
+        imagePullPolicy: IfNotPresent
+        args: ["scan"]
+        ports:
+        - containerPort: 8080
+        env:
+        # The first 10 minutes after each start learn the house's usual counts.
+        - name: OVERWATCH_LEARN_SECONDS
+          value: "600"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: dbus
+          mountPath: /run/dbus/system_bus_socket
+        resources:
+          requests:
+            cpu: 20m
+            memory: 48Mi
+          # brick1982 is a Pi 4: no tight CPU limit (docs: slow starters).
+          limits:
+            cpu: 500m
+            memory: 128Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        # Ready while BlueZ is scanning.
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 3
+          periodSeconds: 5
+      volumes:
+      - name: dbus
+        hostPath:
+          path: /run/dbus/system_bus_socket
+          type: Socket

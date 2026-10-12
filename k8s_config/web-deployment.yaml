@@ -24,6 +24,17 @@ spec:
         labelSelector:
           matchLabels:
             app: overwatch-web
+      # Stateless, so off brick2000 (the storage node) when the other workers
+      # can take them; soft, so they still run there if one is down.
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: chuck.io/storage-node
+                operator: NotIn
+                values: ["true"]
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true

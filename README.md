@@ -41,6 +41,12 @@ Laid out like wigle-console and the chuck reader (same palette and fonts):
   is, and a verdict (usual, above usual, unsure, learning);
 - the last half hour's alerts. A new one flashes the header for a minute.
 
+It's live: nothing polls. Each advert that changes what the page shows is
+pushed from the scanner to the web pods to every open browser as it happens
+(Server-Sent Events; the test suite holds that path under 100 ms). The
+header shows how long ago the last change was. Trackers advertise every
+0.1–2 s, so that's how fresh it gets.
+
 ## How it runs
 
 One image (`whitepatrick/overwatch`), two roles, in the `overwatch` namespace:
@@ -50,23 +56,28 @@ One image (`whitepatrick/overwatch`), two roles, in the `overwatch` namespace:
   first (`Recreate`). It talks to the host's bluetoothd through the D-Bus
   system socket (a `hostPath` mount), so it runs as `nobody` (the bus refuses
   a uid the host doesn't know) with no
-  capabilities, a read-only root filesystem and no host network. Ready while
-  BlueZ is scanning.
+  capabilities, a read-only root filesystem and no host network. It
+  publishes on every advert that changes the state, and on a one-second tick
+  for the clock-driven changes (devices leaving, alerts, the learning
+  countdown). Ready while BlueZ is scanning.
 - **`overwatch-web`**: two pods spread across nodes, with a
-  PodDisruptionBudget (`minAvailable: 1`). They hold no state: each polls
-  the scanner every 2 s and serves its last answer, so either replica gives
-  the same page. Ready once the first answer has arrived, so a rollout keeps
-  the old pods serving until a new one has data. After that, a pod stays
-  ready if the scanner goes away and the page says "no signal".
+  PodDisruptionBudget (`minAvailable: 1`). They hold no state: each keeps
+  one stream open to the scanner and passes each change straight on to its
+  browsers, so either replica gives the same page. Ready once the first
+  state has arrived, so a rollout keeps the old pods serving until a new one
+  has data. After that, a pod stays ready if the scanner goes away (closed
+  connection, or 15 s without its 5 s heartbeat) and the page says "no
+  signal". When a web pod goes, browsers reconnect to the other on their own.
 
 ```
-browser ─▶ brick9000's Caddy ─▶ Traefik ─▶ overwatch-web ×2 ──poll──▶ overwatch-scanner ─D-Bus─▶ bluetoothd (brick1982)
+browser ◀─SSE── Caddy (brick9000) ◀── Traefik ◀── overwatch-web ×2 ◀─SSE── overwatch-scanner ◀─D-Bus── bluetoothd (brick1982)
 ```
 
 | Endpoint | Scanner | Web |
 | --- | --- | --- |
 | `/` | | the page |
-| `/api/state` | counts per kind, alerts, learning, error | `{now, fetched, error, scanner}` |
+| `/api/stream` | Server-Sent Events: the state now, then each change | the same as `{error, scanner}` |
+| `/api/state` | the state once (counts per kind, alerts, learning, error) | `{now, error, scanner}` once |
 | `/health` | process up | process up |
 | `/ready` | BlueZ scanning | has heard from the scanner |
 

@@ -63,7 +63,6 @@ body{ background:var(--bg); color:var(--text); font-family:var(--font-ui); min-h
   font-family:var(--font-display); font-weight:900; font-size:clamp(22px,5vw,30px); letter-spacing:.03em; margin:0; line-height:1;
   text-shadow:0 0 18px rgba(255,42,109,0.55), 0 0 42px rgba(5,217,232,0.25);
 }
-.brand-title .accent{ color:var(--magenta); }
 .clock{ font-family:var(--font-mono); font-size:13px; color:var(--text-dim); }
 .links{
   margin-top:10px; font-family:var(--font-mono); font-size:12.5px; color:var(--text-faint);
@@ -151,12 +150,13 @@ footer{ font-family:var(--font-mono); font-size:11px; color:var(--text-faint); t
 
   <header class="hud" id="hud">
     <div class="hud-top">
-      <h1 class="brand-title">over<span class="accent">_</span>watch</h1>
+      <h1 class="brand-title">overwatch</h1>
       <div class="clock" id="clock">--:--</div>
     </div>
     <div class="links">
       <span>scanner <b class="idle" id="l-scanner">…</b></span>
-      <span>data <b class="idle" id="l-data">…</b></span>
+      <span>feed <b class="idle" id="l-data">connecting</b></span>
+      <span>last change <b class="idle" id="l-changed">—</b></span>
     </div>
     <div class="word" id="word" aria-live="polite">WAITING</div>
     <div class="line" id="line">Waiting for the scanner…</div>
@@ -191,9 +191,9 @@ footer{ font-family:var(--font-mono); font-size:11px; color:var(--text-faint); t
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
-// The data is stale once the web pod hasn't heard from the scanner for this long.
-const STALE_SECONDS = 15;
-let seenAlerts = null, sirenUntil = 0;
+// Pushed, not polled: the scanner sends each change to the web pods, which
+// send it straight on here (Server-Sent Events; the browser reconnects itself).
+let last = null, seenAlerts = null, sirenUntil = 0;
 
 function nearness(rssi) { return rssi >= -60 ? "very close" : rssi >= -75 ? "close" : "far off"; }
 function minsAgo(seconds) { const m = Math.round(seconds / 60); return m < 1 ? "just now" : `${m} min ago`; }
@@ -212,22 +212,21 @@ function setStat(id, n, cls, sub) {
 function setLink(id, text, cls) { const b = $(id); b.textContent = text; b.className = cls; }
 
 function render(st) {
-  const s = st.scanner, age = st.fetched ? st.now - st.fetched : Infinity;
-  const stale = age > STALE_SECONDS;
+  const s = st.scanner, now = Date.now() / 1000;
+  const stale = Boolean(st.error);
   const kinds = (s && s.kinds) || [], alerts = ((s && s.alerts) || []).slice().reverse();
   const learning = s && s.learning > 0;
   const above = kinds.filter(k => !learning && k.confidence !== "low" && k.count > k.normal);
-  const fresh = alerts.find(a => s.now - a.at < 300);
+  const fresh = alerts.find(a => now - a.at < 300);
 
   setLink("l-scanner", !s ? "…" : s.error ? s.error : s.scanning ? "scanning" : "starting", !s ? "idle" : s.error ? "warn" : s.scanning ? "" : "idle");
-  setLink("l-data", stale ? (st.fetched ? `stale ${Math.round(age)}s` : "none yet") : "live", stale ? "warn" : "");
 
   // The headline: one word and one sentence.
   let word, cls, line;
   if (!s) [word, cls, line] = ["WAITING", "", "Waiting for the scanner…"];
-  else if (stale) [word, cls, line] = ["NO SIGNAL", "bad", `The scanner hasn't answered for ${minsAgo(age).replace(" ago", "")}.`];
+  else if (stale) [word, cls, line] = ["NO SIGNAL", "bad", "Lost the scanner; reconnecting. Showing what it last said."];
   else if (s.error) [word, cls, line] = ["SCANNER DOWN", "bad", `${s.error}; trying again every 30 s.`];
-  else if (fresh) [word, cls, line] = ["ALERT", "bad", `${fresh.count} × ${fresh.label}, usually ${fresh.normal} (${minsAgo(s.now - fresh.at)}).`];
+  else if (fresh) [word, cls, line] = ["ALERT", "bad", `${fresh.count} × ${fresh.label}, usually ${fresh.normal} (${minsAgo(now - fresh.at)}).`];
   else if (above.length) [word, cls, line] = ["HEADS UP", "idle", above.map(k => `${k.count} × ${k.label}, usually ${k.normal}`).join(" · ")];
   else if (learning) [word, cls, line] = ["LEARNING", "idle", `Learning what's normal here: ${Math.ceil(s.learning / 60)} min left.`];
   else [word, cls, line] = ["ALL CLEAR", "ok", kinds.length ? "Only the usual devices nearby." : "Nothing of interest nearby."];
@@ -259,7 +258,7 @@ function render(st) {
 
   $("alerts").replaceChildren(...alerts.map(a => {
     const box = el("div", "fault"), top = el("div", "top");
-    top.append(el("span", "name", a.label), el("span", "when", minsAgo(s.now - a.at)));
+    top.append(el("span", "name", a.label), el("span", "when", minsAgo(now - a.at)));
     box.append(top, el("div", "detail", `${a.count} around, usually ${a.normal} · ${nearness(a.rssi)} · ${a.confidence} confidence`));
     return box;
   }));
@@ -272,13 +271,23 @@ function render(st) {
   $("hud").classList.toggle("siren", Date.now() < sirenUntil);
 }
 
-async function refresh() {
-  try { render(await (await fetch("/api/state", { cache: "no-store" })).json()); }
-  catch (e) { setLink("l-data", "page offline", "warn"); }
+// Between pushes, keep the clock-driven bits moving: "last change", alert ages.
+function tick() {
+  $("clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const changed = last && last.scanner && last.scanner.changed;
+  const ago = changed ? Math.max(0, Date.now() / 1000 - changed) : null;
+  setLink("l-changed", ago === null ? "—" : ago < 1 ? `${Math.round(ago * 1000)} ms ago` : ago < 60 ? `${ago.toFixed(1)} s ago` : minsAgo(ago), ago === null ? "idle" : "");
 }
-function tick() { $("clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
-setInterval(refresh, 2000); refresh();
-setInterval(tick, 1000); tick();
+setInterval(() => { if (last) render(last); }, 1000);
+setInterval(tick, 250); tick();
+
+function connect() {
+  const feed = new EventSource("/api/stream");
+  feed.onopen = () => setLink("l-data", "live", "");
+  feed.onmessage = e => { last = JSON.parse(e.data); render(last); tick(); };
+  feed.onerror = () => setLink("l-data", "reconnecting", "warn");  // EventSource retries on its own
+}
+connect();
 </script>
 </body>
 </html>

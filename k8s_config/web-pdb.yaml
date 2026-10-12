@@ -1,0 +1,11 @@
+# Keep one web pod up through node drains and evictions.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: overwatch-web
+  namespace: overwatch
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: overwatch-web

@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: overwatch-web
+  namespace: overwatch
+spec:
+  # Two pods on different nodes, so the page keeps answering while one moves,
+  # restarts or rolls out (its PodDisruptionBudget keeps one up during drains).
+  # They hold no state: each polls the scanner and serves its last answer.
+  replicas: 2
+  selector:
+    matchLabels:
+      app: overwatch-web
+  template:
+    metadata:
+      labels:
+        app: overwatch-web
+    spec:
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        # Soft: with only one schedulable node left, both still run.
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app: overwatch-web
+        # Spread each rollout's own pods: without this the old, terminating
+        # pods count too, and both new ones landed on the same node.
+        matchLabelKeys: ["pod-template-hash"]
+      # Stateless, so off brick2000 (the storage node) when the other workers
+      # can take them; soft, so they still run there if one is down.
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: chuck.io/storage-node
+                operator: NotIn
+                values: ["true"]
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534  # nobody: the host's D-Bus needs a uid it knows (Dockerfile)
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: web
+        image: whitepatrick/overwatch:0.3.0
+        imagePullPolicy: IfNotPresent
+        args: ["web"]
+        ports:
+        - containerPort: 8080
+        env:
+        - name: OVERWATCH_SCANNER_URL
+          value: "http://overwatch-scanner.overwatch.svc.cluster.local"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        resources:
+          requests:
+            cpu: 20m
+            memory: 48Mi
+          limits:
+            cpu: 250m
+            memory: 128Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        # Ready once the first answer from the scanner has arrived, so a
+        # rollout keeps the old pod serving until the new one has data.
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 2
+          periodSeconds: 5

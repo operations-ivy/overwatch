@@ -1,0 +1,15 @@
+# Only the web pods talk to it. Not-ready addresses are published too, so the
+# page can say "no Bluetooth" rather than just "no signal".
+apiVersion: v1
+kind: Service
+metadata:
+  name: overwatch-scanner
+  namespace: overwatch
+spec:
+  selector:
+    app: overwatch-scanner
+  publishNotReadyAddresses: true
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8080

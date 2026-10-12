@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>overwatch — overwatch.brick.nozdormu.cloud</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+/* Palette, type and HUD chrome shared with wigle-console and chucks-wisdom's reader. */
+:root{
+  --bg:#07050f;
+  --panel:#0e0a1e;
+  --panel-2:#120d24;
+  --line:#241a44;
+  --line-bright:#3a2a6e;
+  --text:#e7e3ff;
+  --text-dim:#8b84b8;
+  --text-faint:#5c5488;
+  --magenta:#ff2a6d;
+  --cyan:#05d9e8;
+  --amber:#f9c80e;
+  --violet:#9d4edd;
+  --acid:#39ff88;
+  --danger:#ff3860;
+  --font-display:'Orbitron',"Segoe UI",sans-serif;
+  --font-ui:'Rajdhani',"Segoe UI",sans-serif;
+  --font-mono:'Share Tech Mono','Courier New',monospace;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{ background:var(--bg); color:var(--text); font-family:var(--font-ui); min-height:100vh; }
+::selection{background:var(--magenta);color:#07050f;}
+
+.scanlines{
+  position:fixed; inset:0; z-index:2; pointer-events:none;
+  background:repeating-linear-gradient(to bottom, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) 1px, transparent 2px, transparent 3px);
+  mix-blend-mode:overlay;
+}
+.wrap{ position:relative; z-index:3; max-width:1240px; margin:0 auto; padding:18px 16px 40px; display:flex; flex-direction:column; gap:14px; }
+/* Desktop: what's nearby on the left, alerts on the right. Phones: one column. */
+.cols{ display:grid; grid-template-columns:minmax(0,1fr); gap:14px; align-items:start; }
+@media (min-width:900px){ .cols{ grid-template-columns:minmax(0,3fr) minmax(0,2fr); } }
+
+.hud{
+  border:1px solid var(--line-bright); background:linear-gradient(180deg, var(--panel), var(--panel-2));
+  border-radius:6px; padding:16px 18px; position:relative; overflow:hidden;
+  box-shadow:0 0 0 1px rgba(5,217,232,0.08), 0 18px 60px -30px rgba(255,42,109,0.35);
+}
+.hud::before{
+  content:""; position:absolute; top:0; left:0; right:0; height:2px;
+  background:linear-gradient(90deg, var(--magenta), var(--cyan), var(--violet), var(--magenta));
+  background-size:200% 100%; animation:sweep 6s linear infinite;
+}
+@keyframes sweep{ to{ background-position:200% 0; } }
+/* A fresh alert flashes the whole header for a minute. */
+.hud.siren{ animation:siren 1s steps(1) infinite; border-color:var(--danger); }
+@keyframes siren{ 0%{ background:#ff3860; } 50%{ background:#6e1028; } }
+.hud.siren .word, .hud.siren .line{ color:#fff !important; text-shadow:none; }
+.hud-top{ display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+.brand-title{
+  font-family:var(--font-display); font-weight:900; font-size:clamp(22px,5vw,30px); letter-spacing:.03em; margin:0; line-height:1;
+  text-shadow:0 0 18px rgba(255,42,109,0.55), 0 0 42px rgba(5,217,232,0.25);
+}
+.clock{ font-family:var(--font-mono); font-size:13px; color:var(--text-dim); }
+.links{
+  margin-top:10px; font-family:var(--font-mono); font-size:12.5px; color:var(--text-faint);
+  display:flex; flex-wrap:wrap; gap:4px 16px;
+}
+.links b{ color:var(--acid); font-weight:400; }
+.links b.warn{ color:var(--danger); }
+.links b.idle{ color:var(--amber); }
+
+/* The headline: the state in one word, then one sentence. */
+.word{
+  margin-top:14px; font-family:var(--font-display); font-weight:700; font-size:clamp(30px,8vw,46px); line-height:1;
+  color:var(--text-faint);
+}
+.word.ok{ color:var(--acid); text-shadow:0 0 18px rgba(57,255,136,.5); }
+.word.idle{ color:var(--amber); text-shadow:0 0 18px rgba(249,200,14,.5); }
+.word.bad{ color:var(--danger); text-shadow:0 0 18px rgba(255,56,96,.6); }
+.line{ margin-top:8px; font-family:var(--font-mono); font-size:15px; color:var(--text-dim); overflow-wrap:anywhere; }
+
+.stat-row{ margin-top:14px; display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; }
+@media (min-width:600px){ .stat-row{ grid-template-columns:repeat(4, minmax(0,1fr)); } }
+.stat{ border:1px solid var(--line); background:rgba(255,255,255,0.02); border-radius:4px; padding:10px 12px; min-width:0; }
+.stat .n{
+  font-family:var(--font-display); font-size:22px; font-weight:700; color:var(--text);
+  font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.stat .l{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.14em; color:var(--text-faint); text-transform:uppercase; }
+.stat .sub{ font-family:var(--font-mono); font-size:11px; color:var(--text-dim); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.stat.cy .n{ color:var(--cyan); text-shadow:0 0 12px rgba(5,217,232,.6); }
+.stat.mag .n{ color:var(--magenta); text-shadow:0 0 12px rgba(255,42,109,.6); }
+.stat.ok .n{ color:var(--acid); text-shadow:0 0 12px rgba(57,255,136,.5); }
+.stat.idle .n{ color:var(--amber); text-shadow:0 0 12px rgba(249,200,14,.5); }
+.stat.bad{ border-color:var(--danger); }
+.stat.bad .n{ color:var(--danger); text-shadow:0 0 12px rgba(255,56,96,.6); }
+.stat.zero .n{ color:var(--text-faint); text-shadow:none; }
+
+.panel{
+  border:1px solid var(--line); border-radius:6px; padding:12px 16px 14px;
+  background:linear-gradient(160deg, var(--panel) 0%, var(--panel-2) 100%); min-width:0;
+}
+.panel-head{ display:flex; align-items:baseline; gap:10px; margin-bottom:10px; }
+.panel-head h2{ font-family:var(--font-mono); font-size:13px; font-weight:400; letter-spacing:.08em; color:var(--text); margin:0; }
+.panel-head .meta{ margin-left:auto; font-family:var(--font-mono); font-size:11px; color:var(--text-faint); text-align:right; }
+
+table{ width:100%; border-collapse:collapse; }
+th{
+  text-align:left; font-weight:400; font-family:var(--font-mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase;
+  color:var(--text-faint); padding:5px 10px 5px 0; border-bottom:1px solid var(--line); white-space:nowrap;
+}
+td{ padding:8px 10px 8px 0; border-bottom:1px dashed var(--line); vertical-align:middle; }
+td.what .name{ font-family:var(--font-ui); font-weight:700; font-size:18px; color:var(--text); }
+td.what .sub{ font-family:var(--font-mono); font-size:11.5px; color:var(--text-dim); margin-top:1px; }
+th.num, td.num{ text-align:right; }
+td.num{ font-family:var(--font-ui); font-weight:700; font-size:22px; font-variant-numeric:tabular-nums; color:var(--text); }
+td.num.usual{ font-size:18px; color:var(--text-dim); }
+td.num.hot{ color:var(--amber); }
+td.v{ text-align:right; padding-right:0; }
+
+/* Each kind's row opens to show its devices. */
+.toggle{
+  display:flex; align-items:center; gap:10px; width:100%; padding:0; margin:0; background:none; border:0;
+  color:inherit; font:inherit; text-align:left; cursor:pointer;
+}
+.toggle:focus-visible{ outline:2px solid var(--cyan); outline-offset:3px; border-radius:3px; }
+.chev{ flex:none; width:10px; color:var(--text-faint); font-family:var(--font-mono); font-size:12px; transition:transform .15s; }
+.toggle[aria-expanded="true"] .chev{ transform:rotate(90deg); color:var(--cyan); }
+.ico{ flex:none; width:22px; height:22px; color:var(--cyan); filter:drop-shadow(0 0 6px rgba(5,217,232,.45)); }
+.ico.gadget{ color:var(--magenta); filter:drop-shadow(0 0 6px rgba(255,42,109,.45)); }
+.ico.low{ opacity:.6; }
+tr.open > td{ border-bottom:0; }
+tr.detail > td{ padding:0 0 12px 30px; border-bottom:1px dashed var(--line); }
+.devices{ display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); gap:8px; }
+.device{ border:1px solid var(--line); border-radius:4px; background:rgba(255,255,255,0.02); padding:8px 10px; min-width:0; }
+.device .head{ display:flex; align-items:baseline; gap:8px; }
+.device .head b{ font-family:var(--font-ui); font-weight:700; font-size:15px; color:var(--text); }
+.device .head span{ margin-left:auto; font-family:var(--font-mono); font-size:11px; color:var(--text-faint); white-space:nowrap; }
+.meter{ height:4px; margin:6px 0 4px; background:var(--line); border-radius:2px; overflow:hidden; }
+.meter i{ display:block; height:100%; background:linear-gradient(90deg, var(--cyan), var(--acid)); }
+.device dl{ display:grid; grid-template-columns:auto 1fr; gap:2px 10px; margin:4px 0 0; font-family:var(--font-mono); font-size:11.5px; }
+.device dt{ color:var(--text-faint); }
+.device dd{ margin:0; color:var(--text-dim); overflow-wrap:anywhere; }
+/* Phones: the verdict moves under the name, so the name keeps its width. */
+.what .verdict{ display:none; margin-top:4px; }
+@media (max-width:599px){
+  th.vh, td.v{ display:none; }
+  .what .verdict{ display:inline-block; }
+  tr.detail > td{ padding-left:0; }
+}
+
+.verdict{
+  display:inline-block; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase;
+  padding:2px 6px; border-radius:3px; border:1px solid currentColor; white-space:nowrap;
+}
+.verdict.ok{ color:var(--acid); }
+.verdict.bad{ color:var(--danger); }
+.verdict.idle{ color:var(--amber); }
+.verdict.unsure{ color:var(--violet); }
+
+.fault{ border-left:3px solid var(--danger); padding:6px 10px; margin-bottom:6px; background:rgba(255,56,96,0.05); }
+.fault .top{ display:flex; gap:2px 10px; align-items:baseline; }
+.fault .name{ font-family:var(--font-ui); font-weight:700; font-size:16px; color:var(--text); }
+.fault .when{ margin-left:auto; font-family:var(--font-mono); font-size:11px; color:var(--text-faint); white-space:nowrap; }
+.fault .detail{ font-family:var(--font-mono); font-size:12px; color:var(--text-dim); margin-top:2px; }
+
+.empty{ font-family:var(--font-mono); font-size:12.5px; color:var(--text-faint); padding:10px 0; }
+footer{ font-family:var(--font-mono); font-size:11px; color:var(--text-faint); text-align:center; }
+
+@media (prefers-reduced-motion: reduce){ .hud::before{ animation:none; } .hud.siren{ animation:none; background:#6e1028; } }
+</style>
+</head>
+<body>
+
+<div class="scanlines" aria-hidden="true"></div>
+
+<div class="wrap">
+
+  <header class="hud" id="hud">
+    <div class="hud-top">
+      <h1 class="brand-title">overwatch</h1>
+      <div class="clock" id="clock">--:--</div>
+    </div>
+    <div class="links">
+      <span>scanner <b class="idle" id="l-scanner">…</b></span>
+      <span>feed <b class="idle" id="l-data">connecting</b></span>
+      <span>last change <b class="idle" id="l-changed">—</b></span>
+    </div>
+    <div class="word" id="word" aria-live="polite">WAITING</div>
+    <div class="line" id="line">Waiting for the scanner…</div>
+    <div class="stat-row">
+      <div class="stat cy" id="t-trackers"><div class="n">—</div><div class="l">Trackers</div><div class="sub">nearby now</div></div>
+      <div class="stat mag" id="t-gadgets"><div class="n">—</div><div class="l">Gadgets</div><div class="sub">nearby now</div></div>
+      <div class="stat" id="t-alerts"><div class="n">—</div><div class="l">Alerts</div><div class="sub">last 30 min</div></div>
+      <div class="stat" id="t-mode"><div class="n">—</div><div class="l">Mode</div><div class="sub">&nbsp;</div></div>
+    </div>
+  </header>
+
+  <div class="cols">
+    <section class="panel">
+      <div class="panel-head"><h2>NEARBY</h2><span class="meta">Bluetooth LE · last 2 min</span></div>
+      <table>
+        <thead><tr><th>What</th><th class="num">Here</th><th class="num">Usual</th><th class="vh"></th></tr></thead>
+        <tbody id="nearby"></tbody>
+      </table>
+      <div class="empty" id="nearby-empty" hidden>Nothing of interest nearby.</div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>ALERTS</h2><span class="meta">last 30 min</span></div>
+      <div id="alerts"></div>
+      <div class="empty" id="alerts-empty">None.</div>
+    </section>
+  </div>
+
+  <footer>Bluetooth addresses are never stored or shown · operations-ivy/overwatch</footer>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+// Brand marks from Simple Icons 16.33.0 (CC0); the dolphin is Delapouite's,
+// game-icons.net (CC BY 3.0); the chip is Lucide 1.48.0's microchip (ISC).
+const SHAPES = {
+  apple: ["0 0 24 24", '<path fill="currentColor" d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/>'],
+  samsung: ["0 0 24 24", '<path fill="currentColor" d="M19.8166 10.2808l.0459 2.6934h-.023l-.7793-2.6934h-1.2837v3.3925h.8481l-.0458-2.785h.023l.8366 2.785h1.2264v-3.3925zm-16.149 0l-.6418 3.427h.9284l.4699-3.1175h.0229l.4585 3.1174h.9169l-.6304-3.4269zm5.1805 0l-.424 2.6132h-.023l-.424-2.6132H6.5788l-.0688 3.427h.8596l.023-3.0832h.0114l.573 3.0831h.8711l.5731-3.083h.023l.0228 3.083h.8596l-.0802-3.4269zm-7.2664 2.4527c.0343.0802.0229.1949.0114.2522-.0229.1146-.1031.2292-.3324.2292-.2177 0-.3438-.126-.3438-.3095v-.3323H0v.2636c0 .7679.6074.9971 1.2493.9971.6189 0 1.1346-.2178 1.2149-.7794.0458-.298.0114-.4928 0-.5616-.1605-.722-1.467-.9283-1.5588-1.3295-.0114-.0688-.0114-.1375 0-.1834.023-.1146.1032-.2292.3095-.2292.2063 0 .321.126.321.3095v.2063h.8595v-.2407c0-.745-.6762-.8596-1.1576-.8596-.6074 0-1.1117.2063-1.2034.7564-.023.149-.0344.2866.0114.4585.1376.7106 1.364.9169 1.5358 1.3524m11.152 0c.0343.0803.0228.1834.0114.2522-.023.1146-.1032.2292-.3324.2292-.2178 0-.3438-.126-.3438-.3095v-.3323h-.917v.2636c0 .7564.596.9857 1.2379.9857.6189 0 1.1232-.2063 1.2034-.7794.0459-.298.0115-.4814 0-.5616-.1375-.7106-1.4327-.9284-1.5243-1.318-.0115-.0688-.0115-.1376 0-.1835.0229-.1146.1031-.2292.3094-.2292.1948 0 .321.126.321.3095v.2063h.848v-.2407c0-.745-.6647-.8596-1.146-.8596-.6075 0-1.1004.1948-1.192.7564-.023.149-.023.2866.0114.4585.1376.7106 1.341.9054 1.513 1.3524m2.8882.4585c.2407 0 .3094-.1605.3323-.2522.0115-.0343.0115-.0917.0115-.126v-2.533h.871v2.4642c0 .0688 0 .1948-.0114.2292-.0573.6419-.5616.8482-1.192.8482-.6303 0-1.1346-.2063-1.192-.8482 0-.0344-.0114-.1604-.0114-.2292v-2.4642h.871v2.533c0 .0458 0 .0916.0115.126 0 .0917.0688.2522.3095.2522m7.1518-.0344c.2522 0 .3324-.1605.3553-.2522.0115-.0343.0115-.0917.0115-.126v-.4929h-.3553v-.5043H24v.917c0 .0687 0 .1145-.0115.2292-.0573.6303-.596.8481-1.2034.8481-.6075 0-1.1461-.2178-1.2034-.8481-.0115-.1147-.0115-.1605-.0115-.2293v-1.444c0-.0574.0115-.172.0115-.2293.0802-.6419.596-.8482 1.2034-.8482s1.1347.2063 1.2034.8482c.0115.1031.0115.2292.0115.2292v.1146h-.8596v-.1948s0-.0803-.0115-.1261c-.0114-.0802-.0802-.2521-.3438-.2521-.2521 0-.321.1604-.3438.2521-.0115.0458-.0115.1032-.0115.1605v1.5702c0 .0458 0 .0916.0115.126 0 .0917.0917.2522.3323.2522"/>'],
+  tile: ["0 0 24 24", '<path fill="currentColor" d="M7.486 8.483h1.617a.16.16 0 0 1 .15.15v9.706a.16.16 0 0 1-.15.15H7.486a.162.162 0 0 1-.15-.15V8.633c0-.075.075-.15.15-.15zm3.536-2.972h1.617c.076 0 .151.075.151.15v12.64c0 .075-.075.15-.15.15h-1.618a.162.162 0 0 1-.15-.15V5.66c0-.075.075-.15.15-.15zM5.68 8.483H1.918V5.66a.162.162 0 0 0-.15-.15H.15a.162.162 0 0 0-.15.15v7.787c0 2.746 2.257 5.003 5.003 5.003h.677c.075 0 .15-.075.15-.15v-1.618a.162.162 0 0 0-.15-.15h-.677a3.099 3.099 0 0 1-3.085-3.085v-3.084H5.68c.075 0 .15-.076.15-.15V8.595c0-.076-.075-.113-.15-.113zM22.533 9.95a5.018 5.018 0 0 0-7.035 0c-1.956 1.918-1.918 5.078 0 7.034 1.919 1.956 5.079 1.919 7.035 0a4.48 4.48 0 0 0 .865-1.166.08.08 0 0 0-.075-.075h-2.07l-.225.075c-1.279 1.129-3.235.978-4.363-.338-.339-.414-.602-.903-.678-1.43 0-.075.038-.113.113-.113h7.75c.075 0 .15-.075.15-.15v-.301a5.013 5.013 0 0 0-1.467-3.536zm-.903 2.257h-5.266c-.076 0-.113-.038-.113-.113a3.066 3.066 0 0 1 2.708-1.655c1.129 0 2.182.64 2.709 1.655 0 .038 0 .075-.038.113zM9.404 6.602a1.09 1.09 0 0 1-1.09 1.09 1.09 1.09 0 0 1-1.091-1.09 1.09 1.09 0 0 1 1.09-1.091 1.09 1.09 0 0 1 1.091 1.09Z"/>'],
+  google: ["0 0 24 24", '<path fill="currentColor" d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/>'],
+  meta: ["0 0 24 24", '<path fill="currentColor" d="M6.915 4.03c-1.968 0-3.683 1.28-4.871 3.113C.704 9.208 0 11.883 0 14.449c0 .706.07 1.369.21 1.973a6.624 6.624 0 0 0 .265.86 5.297 5.297 0 0 0 .371.761c.696 1.159 1.818 1.927 3.593 1.927 1.497 0 2.633-.671 3.965-2.444.76-1.012 1.144-1.626 2.663-4.32l.756-1.339.186-.325c.061.1.121.196.183.3l2.152 3.595c.724 1.21 1.665 2.556 2.47 3.314 1.046.987 1.992 1.22 3.06 1.22 1.075 0 1.876-.355 2.455-.843a3.743 3.743 0 0 0 .81-.973c.542-.939.861-2.127.861-3.745 0-2.72-.681-5.357-2.084-7.45-1.282-1.912-2.957-2.93-4.716-2.93-1.047 0-2.088.467-3.053 1.308-.652.57-1.257 1.29-1.82 2.05-.69-.875-1.335-1.547-1.958-2.056-1.182-.966-2.315-1.303-3.454-1.303zm10.16 2.053c1.147 0 2.188.758 2.992 1.999 1.132 1.748 1.647 4.195 1.647 6.4 0 1.548-.368 2.9-1.839 2.9-.58 0-1.027-.23-1.664-1.004-.496-.601-1.343-1.878-2.832-4.358l-.617-1.028a44.908 44.908 0 0 0-1.255-1.98c.07-.109.141-.224.211-.327 1.12-1.667 2.118-2.602 3.358-2.602zm-10.201.553c1.265 0 2.058.791 2.675 1.446.307.327.737.871 1.234 1.579l-1.02 1.566c-.757 1.163-1.882 3.017-2.837 4.338-1.191 1.649-1.81 1.817-2.486 1.817-.524 0-1.038-.237-1.383-.794-.263-.426-.464-1.13-.464-2.046 0-2.221.63-4.535 1.66-6.088.454-.687.964-1.226 1.533-1.533a2.264 2.264 0 0 1 1.088-.285z"/>'],
+  bluetooth: ["0 0 24 24", '<path fill="currentColor" d="M12 0C6.76 0 3.1484 2.4895 3.1484 12S6.76 24 12 24c5.24 0 8.8516-2.4895 8.8516-12S17.24 0 12 0zm-.7773 1.6816l6.2148 6.2149L13.334 12l4.1035 4.1035-6.2148 6.2149V14.125l-3.418 3.42-1.2422-1.2442L10.8515 12l-4.289-4.3008 1.2422-1.2441 3.418 3.4199V1.6816zm1.748 4.2442v3.9687l1.9844-1.9843-1.9844-1.9844zm0 8.1816v3.9668l1.9844-1.9844-1.9844-1.9824Z"/>'],
+  dolphin: ["0 0 512 512", '<path fill="currentColor" d="M123.22 47.23c29.498 15.152 55.025 36.05 55.53 67.366-93.62 83.867-83.862 179.356-97.002 270.34-67.68 55.552-67.57 90.948-60.9 101.227 3.94.743 29.11-25.94 48.326-30.397 14.23-4.094 12.284-15.99 16.273-25.275 2.438 14.55 7.17 22.612 17.133 25.485 12.874 3.36 44.932 28.15 51.53 25.504 1.374-20.382-26.01-63.854-48.028-90.087 41.012-63.28 81.365-136.458 211.162-207.77-3.21-3.706-6.216-6.45-8.8-7.986l9.198-15.472c11.617 6.907 20.522 19.56 29.248 35.033 5.94 10.532 11.528 22.644 16.96 35.117 15.682-32.87 22.983-66.406 16.402-90.254l17.35-4.786a87.287 87.287 0 0 1 1.927 8.83c33.29-4.253 55.718-13.083 85.11-29.322 3.744-2.068 19.054-13.012-.117-16.03 12.62-9.017 7.54-12.063 1.973-15.152-6.486-3.6-20.302-8.948-35.758-8.556-12.124-27.863-39.63-47.772-82.225-47.696-28.532.052-63.842 9.086-105.828 30.688C217.895 27.64 164.92 20.468 123.22 47.23zm286.942 28.74a9 9 0 1 1 0 18 9 9 0 0 1 0-18z"/>'],
+  chip: ["0 0 24 24", '<g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 12h4" /> <path d="M10 17h4" /> <path d="M10 7h4" /> <path d="M18 12h2" /> <path d="M18 18h2" /> <path d="M18 6h2" /> <path d="M4 12h2" /> <path d="M4 18h2" /> <path d="M4 6h2" /> <rect x="6" y="2" width="12" height="20" rx="2" /></g>'],
+};
+const KIND_ICON = { findmy: "apple", smarttag: "samsung", tile: "tile", googletag: "google", meta: "meta",
+  flipper: "dolphin", flipperish: "dolphin", skimmer: "chip" };
+const SVGNS = "http://www.w3.org/2000/svg";
+function icon(k) {
+  const [vb, body] = SHAPES[KIND_ICON[k.kind]] || SHAPES.bluetooth;
+  const svg = document.createElementNS(SVGNS, "svg");
+  svg.setAttribute("viewBox", vb); svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("class", `ico${k.tracker ? "" : " gadget"}${k.confidence === "low" ? " low" : ""}`);
+  svg.innerHTML = body;  // our own constants above, never data from the feed
+  return svg;
+}
+
+// Which kinds are open, kept across updates (and reloads, where storage allows).
+let openKinds = new Set();
+try { openKinds = new Set(JSON.parse(localStorage.getItem("overwatch.open") || "[]")); } catch (e) {}
+function toggleKind(kind) {
+  openKinds.has(kind) ? openKinds.delete(kind) : openKinds.add(kind);
+  try { localStorage.setItem("overwatch.open", JSON.stringify([...openKinds])); } catch (e) {}
+  if (last) render(last);
+}
+
+function duration(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.floor(s / 60)} min ${s % 60} s`;
+  return `${Math.floor(s / 3600)} h ${Math.floor(s / 60) % 60} min`;
+}
+function heard(seconds) { return seconds < 1 ? "just now" : seconds < 60 ? `${seconds.toFixed(1)} s ago` : `${duration(seconds)} ago`; }
+// -100 dBm (edge of hearing) to -35 dBm (next to the radio), as a share of the bar.
+function strength(rssi) { return Math.min(100, Math.max(4, (rssi + 100) / 65 * 100)); }
+function deviceCard(d, now) {
+  const card = el("div", "device"), head = el("div", "head"), meter = el("div", "meter"), bar = el("i");
+  head.append(el("b", "", `Device ${d.n}`), el("span", "", `${d.rssi} dBm · ${nearness(d.rssi)}`));
+  bar.style.width = `${strength(d.rssi)}%`; meter.append(bar);
+  const rows = [
+    ["here for", duration(now - d.first)],
+    ["last heard", heard(now - d.last)],
+    ["adverts", `${d.adverts} (${(d.adverts / Math.max(1, (d.last - d.first) / 60)).toFixed(0)}/min)`],
+    ["signal range", `${d.rssi_min} to ${d.rssi_max} dBm`],
+  ];
+  if (d.name) rows.push(["name", d.name]);
+  if (d.battery) rows.push(["battery", d.battery]);
+  if (d.mode) rows.push(["state", d.mode]);
+  if (d.tx_power !== undefined) rows.push(["tx power", `${d.tx_power} dBm`]);
+  if (d.address_type) rows.push(["address", d.address_type === "random" ? "random (rotating, private)" : d.address_type]);
+  if (d.makers) rows.push(["maker data", d.makers.join(", ")]);
+  if (d.services) rows.push(["services", d.services.join(", ")]);
+  const dl = el("dl");
+  for (const [k, v] of rows) dl.append(el("dt", "", k), el("dd", "", v));
+  card.append(head, meter, dl);
+  return card;
+}
+
+// Pushed, not polled: the scanner sends each change to the web pods, which
+// send it straight on here (Server-Sent Events; the browser reconnects itself).
+let last = null, seenAlerts = null, sirenUntil = 0;
+
+function nearness(rssi) { return rssi >= -60 ? "very close" : rssi >= -75 ? "close" : "far off"; }
+function minsAgo(seconds) { const m = Math.round(seconds / 60); return m < 1 ? "just now" : `${m} min ago`; }
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function setStat(id, n, cls, sub) {
+  const box = $(id);
+  box.className = `stat ${cls}`;
+  box.querySelector(".n").textContent = n;
+  if (sub !== undefined) box.querySelector(".sub").textContent = sub;
+}
+function setLink(id, text, cls) { const b = $(id); b.textContent = text; b.className = cls; }
+
+function render(st) {
+  const s = st.scanner, now = Date.now() / 1000;
+  const stale = Boolean(st.error);
+  const kinds = (s && s.kinds) || [], alerts = ((s && s.alerts) || []).slice().reverse();
+  const learning = s && s.learning > 0;
+  const above = kinds.filter(k => !learning && k.confidence !== "low" && k.count > k.normal);
+  const fresh = alerts.find(a => now - a.at < 300);
+
+  setLink("l-scanner", !s ? "…" : s.error ? s.error : s.scanning ? "scanning" : "starting", !s ? "idle" : s.error ? "warn" : s.scanning ? "" : "idle");
+
+  // The headline: one word and one sentence.
+  let word, cls, line;
+  if (!s) [word, cls, line] = ["WAITING", "", "Waiting for the scanner…"];
+  else if (stale) [word, cls, line] = ["NO SIGNAL", "bad", "Lost the scanner; reconnecting. Showing what it last said."];
+  else if (s.error) [word, cls, line] = ["SCANNER DOWN", "bad", `${s.error}; trying again every 30 s.`];
+  else if (fresh) [word, cls, line] = ["ALERT", "bad", `${fresh.count} × ${fresh.label}, usually ${fresh.normal} (${minsAgo(now - fresh.at)}).`];
+  else if (above.length) [word, cls, line] = ["HEADS UP", "idle", above.map(k => `${k.count} × ${k.label}, usually ${k.normal}`).join(" · ")];
+  else if (learning) [word, cls, line] = ["LEARNING", "idle", `Learning what's normal here: ${Math.ceil(s.learning / 60)} min left.`];
+  else [word, cls, line] = ["ALL CLEAR", "ok", kinds.length ? "Only the usual devices nearby." : "Nothing of interest nearby."];
+  $("word").textContent = word; $("word").className = `word ${cls}`;
+  $("line").textContent = line;
+  document.title = `${word.toLowerCase()} · overwatch`;
+
+  const count = pick => kinds.filter(pick).reduce((n, k) => n + k.count, 0);
+  const trackers = count(k => k.tracker), gadgets = count(k => !k.tracker);
+  setStat("t-trackers", s ? trackers : "—", trackers ? "cy" : "zero");
+  setStat("t-gadgets", s ? gadgets : "—", gadgets ? "mag" : "zero");
+  setStat("t-alerts", s ? alerts.length : "—", alerts.length ? "bad" : "ok");
+  if (!s) setStat("t-mode", "—", "zero", " ");
+  else if (learning) setStat("t-mode", `${Math.ceil(s.learning / 60)}m`, "idle", "learning the house");
+  else setStat("t-mode", "WATCH", "ok", "comparing to usual");
+
+  // What's around: anything above usual first, then the most numerous. Each
+  // kind opens to show its devices.
+  const rows = kinds.slice().sort((a, b) => above.includes(b) - above.includes(a) || b.count - a.count).flatMap(k => {
+    const hot = above.includes(k), open = openKinds.has(k.kind), tr = el("tr", open ? "open" : "");
+    const what = el("td", "what"), btn = el("button", "toggle"), text = el("div");
+    btn.type = "button";
+    btn.setAttribute("aria-expanded", String(open));
+    btn.addEventListener("click", () => toggleKind(k.kind));
+    const [v, vc] = learning ? ["learning", "idle"] : k.confidence === "low" ? ["unsure", "unsure"] : hot ? ["above usual", "bad"] : ["usual", "ok"];
+    text.append(el("div", "name", k.label), el("div", "sub", `${k.confidence} confidence · closest ${nearness(k.closest)} (${k.closest} dBm)`),
+                el("span", `verdict ${vc}`, v));
+    btn.append(el("span", "chev", "▸"), icon(k), text);
+    what.append(btn);
+    const verdict = el("td", "v"); verdict.append(el("span", `verdict ${vc}`, v));
+    tr.append(what, el("td", hot ? "num hot" : "num", String(k.count)), el("td", "num usual", learning ? "…" : String(k.normal)), verdict);
+    if (!open) return [tr];
+    const detail = el("tr", "detail"), cell = el("td"), grid = el("div", "devices");
+    cell.colSpan = 4;
+    grid.append(...(k.devices || []).map(d => deviceCard(d, now)));
+    cell.append(grid); detail.append(cell);
+    return [tr, detail];
+  });
+  $("nearby").replaceChildren(...rows);
+  $("nearby-empty").hidden = !s || rows.length > 0;
+
+  $("alerts").replaceChildren(...alerts.map(a => {
+    const box = el("div", "fault"), top = el("div", "top");
+    top.append(el("span", "name", a.label), el("span", "when", minsAgo(now - a.at)));
+    box.append(top, el("div", "detail", `${a.count} around, usually ${a.normal} · ${nearness(a.rssi)} · ${a.confidence} confidence`));
+    return box;
+  }));
+  $("alerts-empty").hidden = alerts.length > 0;
+
+  // A new alert (not one already there when the page opened) flashes the header for a minute.
+  const keys = alerts.map(a => `${a.kind}|${a.at}`);
+  if (seenAlerts && keys.some(k => !seenAlerts.has(k))) sirenUntil = Date.now() + 60000;
+  if (s) seenAlerts = new Set(keys);
+  $("hud").classList.toggle("siren", Date.now() < sirenUntil);
+}
+
+// Between pushes, keep the clock-driven bits moving: "last change", alert ages.
+function tick() {
+  $("clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const changed = last && last.scanner && last.scanner.changed;
+  const ago = changed ? Math.max(0, Date.now() / 1000 - changed) : null;
+  setLink("l-changed", ago === null ? "—" : ago < 1 ? `${Math.round(ago * 1000)} ms ago` : ago < 60 ? `${ago.toFixed(1)} s ago` : minsAgo(ago), ago === null ? "idle" : "");
+}
+setInterval(() => { if (last) render(last); }, 1000);
+setInterval(tick, 250); tick();
+
+function connect() {
+  const feed = new EventSource("/api/stream");
+  feed.onopen = () => setLink("l-data", "live", "");
+  feed.onmessage = e => { last = JSON.parse(e.data); render(last); tick(); };
+  feed.onerror = () => setLink("l-data", "reconnecting", "warn");  // EventSource retries on its own
+}
+connect();
+</script>
+</body>
+</html>

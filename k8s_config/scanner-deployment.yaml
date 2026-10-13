@@ -30,7 +30,7 @@ spec:
           type: RuntimeDefault
       containers:
       - name: scanner
-        image: whitepatrick/overwatch:0.3.0
+        image: whitepatrick/overwatch:0.4.0
         imagePullPolicy: IfNotPresent
         args: ["scan"]
         ports:

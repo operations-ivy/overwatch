@@ -31,6 +31,28 @@ SquachWatch signatures with no primary source (Flock and Raven, most of its
 OUI prefixes) are left out, and Wi-Fi ones need a radio overwatch doesn't
 have.
 
+### Wi-Fi attacks
+
+A monitor-mode dongle (brick666's `wlmon0`) watches 802.11 management
+frames:
+
+| Kind | How it's recognised | Confidence |
+| --- | --- | --- |
+| Deauth flood | 10 or more deauth/disassoc frames in 5 s for one BSSID | high on the house's networks, medium on a neighbour's |
+| Evil twin | a house SSID from a BSSID that isn't the house's | high |
+| Evil twin | a house BSSID offering weaker security (open, WPA2 instead of WPA3, …) | high |
+| Evil twin | a house BSSID on a channel the house doesn't use | medium |
+| Karma / Pineapple | one non-house BSSID answering probes for 4 or more SSIDs in a minute | high |
+
+Each one alerts as soon as it's heard; it stays on the page until it's gone
+quiet for two minutes. The house's networks (name, SSID, BSSIDs, security,
+channels) come from the `overwatch-wifi-home` SealedSecret in
+brick-k8s-secrets, never this repo, and the page shows only their names.
+Without it there are no twins, only floods and karma. The dongle spends 60%
+of its time on the house's channels and hops the rest of 2.4 and 5 GHz in
+between (the whole band in about 25 s), so a flood on the house is heard at
+once and a twin elsewhere within half a minute.
+
 Households are full of trackers, so for 10 minutes after each start overwatch
 learns the usual count of each kind. After that, a high or medium kind above
 its usual count for two minutes raises an alert. Only devices heard in the
@@ -61,7 +83,7 @@ header shows how long ago the last change was. Trackers advertise every
 
 ## How it runs
 
-One image (`whitepatrick/overwatch`), two roles, in the `overwatch` namespace:
+One image (`whitepatrick/overwatch`), three roles, in the `overwatch` namespace:
 
 - **`overwatch-scanner`**: one pod, pinned to brick1982. A radio is a place,
   not a replica, so there's exactly one, and a rollout stops the old pod
@@ -72,10 +94,16 @@ One image (`whitepatrick/overwatch`), two roles, in the `overwatch` namespace:
   publishes on every advert that changes the state, and on a one-second tick
   for the clock-driven changes (devices leaving, alerts, the learning
   countdown). Ready while BlueZ is scanning.
+- **`overwatch-wifi`**: a DaemonSet on nodes NFD labels
+  `feature.node.kubernetes.io/wifi-monitor=true` (brick-k8s-config `nfd/`),
+  i.e. wherever the dongle is plugged in. It needs the host network (to
+  reach `wlmon0`) and runs as root with only `NET_ADMIN` (monitor mode,
+  channel hops) and `NET_RAW` (reading frames), on host port 8791. Ready
+  while it's capturing. The page works without it and says so.
 - **`overwatch-web`**: two pods spread across nodes, with a
   PodDisruptionBudget (`minAvailable: 1`). They hold no state: each keeps
   one stream open to the scanner and passes each change straight on to its
-  browsers, so either replica gives the same page. Ready once the first
+  browsers, and another to the Wi-Fi watch, so either replica gives the same page. Ready once the first
   state has arrived, so a rollout keeps the old pods serving until a new one
   has data. After that, a pod stays ready if the scanner goes away (closed
   connection, or 15 s without its 5 s heartbeat) and the page says "no
@@ -83,22 +111,43 @@ One image (`whitepatrick/overwatch`), two roles, in the `overwatch` namespace:
 
 ```
 browser ◀─SSE── Caddy (brick9000) ◀── Traefik ◀── overwatch-web ×2 ◀─SSE── overwatch-scanner ◀─D-Bus── bluetoothd (brick1982)
+                                                            ◀─SSE── overwatch-wifi ◀─AF_PACKET── wlmon0 (brick666)
 ```
 
 | Endpoint | Scanner | Web |
 | --- | --- | --- |
 | `/` | | the page |
-| `/api/stream` | Server-Sent Events: the state now, then each change | the same as `{error, scanner}` |
-| `/api/state` | the state once (counts per kind, alerts, learning, error) | `{now, error, scanner}` once |
+| `/api/stream` | Server-Sent Events: the state now, then each change | the same as `{error, scanner, wifi_error, wifi}` |
+| `/api/state` | the state once (counts per kind, alerts, learning, error) | `{now, error, scanner, wifi_error, wifi}` once |
 | `/health` | process up | process up |
 | `/ready` | BlueZ scanning | has heard from the scanner |
 
+The Wi-Fi watch serves the same endpoints as the scanner.
+
 Settings (environment): `OVERWATCH_PORT` (8080), `OVERWATCH_LEARN_SECONDS` (600,
-scanner), `OVERWATCH_SCANNER_URL` (web).
+scanner), `OVERWATCH_WIFI_IFACE` (`wlmon0`), `OVERWATCH_WIFI_HOME` (the house
+networks' JSON), `OVERWATCH_WIFI_HOME_SHARE` (0.6), `OVERWATCH_SCANNER_URL` and
+`OVERWATCH_WIFI_URL` (web).
+
+### The house's networks
+
+`OVERWATCH_WIFI_HOME` is JSON, sealed into `overwatch-wifi-home` (key
+`home.json`):
+
+```json
+{"networks": [{"name": "home", "ssid": "…", "bssids": ["…"], "security": "WPA2", "channels": [6, 149]}]}
+```
+
+List every BSSID the house's access points use (each band and each mesh
+node has its own). For a draft from what the dongle hears, strongest first:
+`kubectl -n overwatch exec ds/overwatch-wifi -- python -m overwatch wifi-survey 60`.
+It prints SSIDs and BSSIDs, so it stays in the terminal: copy the house's
+networks into the secret and fill in each `name`.
 
 ### Privacy
 
-- Device addresses never leave the scanner process: each is hashed with a
+- Device addresses never leave the scanner process (nor do Wi-Fi addresses
+  or SSIDs leave the Wi-Fi watch; access points are "AP 3"): each is hashed with a
   per-start salt to tell devices apart. The page numbers devices ("Device
   3") instead. No key material or raw payloads leave it either, only
   decoded fields (`describe` in `overwatch/watch.py`).

@@ -1,7 +1,7 @@
 # Built and pushed by brick9000/build-image in brick-cicd-config:
 #   build-image https://github.com/operations-ivy/overwatch main whitepatrick/overwatch:<version>
 #
-# One image, two roles (k8s_config/): `scan` and `web`. The base image is
+# One image, three roles (k8s_config/): `scan`, `wifi` and `web`. The base image is
 # pinned by digest and dependencies come from poetry.lock. Bump the base
 # deliberately, with the digest from:
 #   docker buildx imagetools inspect python:3.11-slim-bookworm
@@ -19,6 +19,8 @@ COPY pyproject.toml poetry.lock /code/
 RUN python -m venv --without-pip /venv && poetry install --no-root --only main
 
 FROM ${PYTHON}
+# iw and ip for the Wi-Fi watch: monitor mode and channel hops on the dongle.
+RUN apt-get update && apt-get install -y --no-install-recommends iw iproute2 && rm -rf /var/lib/apt/lists/*
 COPY --from=deps /venv /venv
 # Read-only root filesystem in the cluster, so no .pyc files.
 ENV VIRTUAL_ENV=/venv PATH=/venv/bin:$PATH PYTHONPATH=/code PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
@@ -28,6 +30,7 @@ COPY overwatch/ /code/overwatch/
 # Not root: BlueZ's D-Bus policy lets any user scan. It must be a uid the
 # host knows, though: the system bus drops a connection from one with no
 # passwd entry (65532 got "connection reset"), so this is nobody:nogroup.
+# The Wi-Fi watch runs as root with only NET_ADMIN and NET_RAW (its DaemonSet).
 USER 65534:65534
 EXPOSE 8080
 ENTRYPOINT ["python", "-m", "overwatch"]

@@ -1,0 +1,85 @@
+# The Wi-Fi watch: on whichever node has the monitor-mode dongle plugged in
+# (NFD's wifi-monitor label, brick-k8s-config nfd/; brick666 today), so it
+# follows the dongle if it moves. It needs the host's network namespace to
+# reach wlmon0, and root with only NET_ADMIN (monitor mode, channel hops) and
+# NET_RAW (reading frames). Its port is on the host, so it isn't 8080.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: overwatch-wifi
+  namespace: overwatch
+spec:
+  selector:
+    matchLabels:
+      app: overwatch-wifi
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: overwatch-wifi
+    spec:
+      nodeSelector:
+        feature.node.kubernetes.io/wifi-monitor: "true"
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: wifi
+        image: whitepatrick/overwatch:0.5.0
+        imagePullPolicy: IfNotPresent
+        args: ["wifi"]
+        ports:
+        - containerPort: 8791
+        env:
+        - name: OVERWATCH_PORT
+          value: "8791"
+        - name: OVERWATCH_WIFI_IFACE
+          value: wlmon0
+        # The house's networks, from the overwatch-wifi-home SealedSecret
+        # (brick-k8s-secrets). Without it: deauth floods and karma, no twins.
+        - name: OVERWATCH_WIFI_HOME
+          value: /etc/overwatch/home.json
+        # Share of the time on the house's channels; the rest hops the band.
+        - name: OVERWATCH_WIFI_HOME_SHARE
+          value: "0.6"
+        securityContext:
+          runAsUser: 0
+          runAsNonRoot: false
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+            add: ["NET_ADMIN", "NET_RAW"]
+        volumeMounts:
+        - name: home
+          mountPath: /etc/overwatch
+          readOnly: true
+        resources:
+          requests:
+            cpu: 30m
+            memory: 48Mi
+          limits:
+            cpu: 500m
+            memory: 128Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8791
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        # Ready while the dongle is capturing.
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8791
+          initialDelaySeconds: 3
+          periodSeconds: 5
+      volumes:
+      - name: home
+        secret:
+          secretName: overwatch-wifi-home
+          optional: true

@@ -42,6 +42,7 @@ body{ background:var(--bg); color:var(--text); font-family:var(--font-ui); min-h
 /* Desktop: what's nearby on the left, alerts on the right. Phones: one column. */
 .cols{ display:grid; grid-template-columns:minmax(0,1fr); gap:14px; align-items:start; }
 @media (min-width:900px){ .cols{ grid-template-columns:minmax(0,3fr) minmax(0,2fr); } }
+.stack{ display:grid; gap:14px; min-width:0; }
 
 .hud{
   border:1px solid var(--line-bright); background:linear-gradient(180deg, var(--panel), var(--panel-2));
@@ -186,6 +187,7 @@ footer{ font-family:var(--font-mono); font-size:11px; color:var(--text-faint); t
     </div>
     <div class="links">
       <span>scanner <b class="idle" id="l-scanner">…</b></span>
+      <span id="w-link" hidden>wi-fi <b class="idle" id="l-wifi">…</b></span>
       <span>feed <b class="idle" id="l-data">connecting</b></span>
       <span>last change <b class="idle" id="l-changed">—</b></span>
     </div>
@@ -200,6 +202,7 @@ footer{ font-family:var(--font-mono); font-size:11px; color:var(--text-faint); t
   </header>
 
   <div class="cols">
+   <div class="stack">
     <section class="panel">
       <div class="panel-head"><h2>NEARBY</h2><span class="meta">Bluetooth LE · last 2 min</span></div>
       <table>
@@ -209,6 +212,16 @@ footer{ font-family:var(--font-mono); font-size:11px; color:var(--text-faint); t
       <div class="empty" id="nearby-empty" hidden>Nothing of interest nearby.</div>
     </section>
 
+    <section class="panel" id="wifi-panel" hidden>
+      <div class="panel-head"><h2>WI-FI</h2><span class="meta" id="wifi-meta">deauth floods · evil twins · karma</span></div>
+      <table>
+        <thead><tr><th>What</th><th class="num">Ch</th><th class="num">Signal</th><th class="vh"></th></tr></thead>
+        <tbody id="wifi"></tbody>
+      </table>
+      <div class="empty" id="wifi-empty" hidden></div>
+    </section>
+   </div>
+
     <section class="panel">
       <div class="panel-head"><h2>ALERTS</h2><span class="meta">last 30 min</span></div>
       <div id="alerts"></div>
@@ -216,7 +229,7 @@ footer{ font-family:var(--font-mono); font-size:11px; color:var(--text-faint); t
     </section>
   </div>
 
-  <footer>Bluetooth addresses are never stored or shown · operations-ivy/overwatch</footer>
+  <footer>Bluetooth and Wi-Fi addresses are never stored or shown · operations-ivy/overwatch</footer>
 </div>
 
 <script>
@@ -310,11 +323,16 @@ function setLink(id, text, cls) { const b = $(id); b.textContent = text; b.class
 function render(st) {
   const s = st.scanner, now = Date.now() / 1000;
   const stale = Boolean(st.error);
-  const kinds = (s && s.kinds) || [], alerts = ((s && s.alerts) || []).slice().reverse();
+  const w = st.wifi, hasWifi = "wifi" in st, threats = (w && w.threats) || [];
+  const kinds = (s && s.kinds) || [];
+  const alerts = ((s && s.alerts) || []).concat((w && w.alerts) || []).sort((a, b) => b.at - a.at);
   const learning = s && s.learning > 0;
   const above = kinds.filter(k => !learning && k.confidence !== "low" && k.count > k.normal);
   const fresh = alerts.find(a => now - a.at < 300);
 
+  $("w-link").hidden = !hasWifi;
+  if (hasWifi) setLink("l-wifi", !w ? (st.wifi_error || "…") : st.wifi_error ? st.wifi_error : w.error ? w.error : w.scanning ? `ch ${w.channel || "…"}` : "starting",
+                       !w || st.wifi_error || w.error ? "warn" : w.scanning ? "" : "idle");
   setLink("l-scanner", !s ? "…" : s.error ? s.error : s.scanning ? "scanning" : "starting", !s ? "idle" : s.error ? "warn" : s.scanning ? "" : "idle");
 
   // The headline: one word and one sentence.
@@ -322,7 +340,9 @@ function render(st) {
   if (!s) [word, cls, line] = ["WAITING", "", "Waiting for the scanner…"];
   else if (stale) [word, cls, line] = ["NO SIGNAL", "bad", "Lost the scanner; reconnecting. Showing what it last said."];
   else if (s.error) [word, cls, line] = ["SCANNER DOWN", "bad", `${s.error}; trying again every 30 s.`];
-  else if (fresh) [word, cls, line] = ["ALERT", "bad", `${fresh.count} × ${fresh.label}, usually ${fresh.normal} (${minsAgo(now - fresh.at)}).`];
+  else if (fresh) [word, cls, line] = ["ALERT", "bad", fresh.detail ? `${fresh.label}: ${fresh.detail} (${minsAgo(now - fresh.at)}).`
+                                                             : `${fresh.count} × ${fresh.label}, usually ${fresh.normal} (${minsAgo(now - fresh.at)}).`];
+  else if (threats.length) [word, cls, line] = ["HEADS UP", "bad", threats.map(t => `${t.label} (AP ${t.n}): ${t.reason}`).join(" · ")];
   else if (above.length) [word, cls, line] = ["HEADS UP", "idle", above.map(k => `${k.count} × ${k.label}, usually ${k.normal}`).join(" · ")];
   else if (learning) [word, cls, line] = ["LEARNING", "idle", `Learning what's normal here: ${Math.ceil(s.learning / 60)} min left.`];
   else [word, cls, line] = ["ALL CLEAR", "ok", kinds.length ? "Only the usual devices nearby." : "Nothing of interest nearby."];
@@ -367,10 +387,28 @@ function render(st) {
   $("alerts").replaceChildren(...alerts.map(a => {
     const box = el("div", "fault"), top = el("div", "top");
     top.append(el("span", "name", a.label), el("span", "when", minsAgo(now - a.at)));
-    box.append(top, el("div", "detail", `${a.count} around, usually ${a.normal} · ${nearness(a.rssi)} · ${a.confidence} confidence`));
+    box.append(top, el("div", "detail", a.detail ? `${a.detail} · ${a.confidence} confidence`
+                                             : `${a.count} around, usually ${a.normal} · ${nearness(a.rssi)} · ${a.confidence} confidence`));
     return box;
   }));
   $("alerts-empty").hidden = alerts.length > 0;
+  // Wi-Fi: each attack heard in the last 2 minutes, newest first.
+  $("wifi-panel").hidden = !hasWifi;
+  if (hasWifi) {
+    $("wifi-meta").textContent = w ? `${w.aps} access points · ${w.home.length ? `watching ${w.home.join(", ")}` : "no house networks set"}` : "…";
+    $("wifi").replaceChildren(...threats.map(t => {
+      const tr = el("tr"), what = el("td", "what"), text = el("div");
+      const extra = t.kind === "deauth" ? ` · ${t.frames} frames${t.broadcast ? ", broadcast" : ""}` : t.kind === "karma" ? ` · ${t.ssids} networks` : "";
+      text.append(el("div", "name", `${t.label} · AP ${t.n}`), el("div", "sub", `${t.reason}${extra} · ${duration(now - t.first)}, last ${heard(now - t.last)}`));
+      what.append(text);
+      const vc = t.confidence === "high" ? "bad" : "idle", verdict = el("td", "v");
+      verdict.append(el("span", `verdict ${vc}`, t.confidence));
+      tr.append(what, el("td", "num", t.channel ? String(t.channel) : "—"), el("td", "num", t.rssi === null ? "—" : `${t.rssi}`), verdict);
+      return tr;
+    }));
+    $("wifi-empty").hidden = threats.length > 0;
+    $("wifi-empty").textContent = !w ? "Waiting for the Wi-Fi watch…" : w.error ? `${w.error}.` : "No attacks heard.";
+  }
 
   // A new alert (not one already there when the page opened) flashes the header for a minute.
   const keys = alerts.map(a => `${a.kind}|${a.at}`);

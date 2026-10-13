@@ -1,0 +1,15 @@
+# Only the web pods talk to it. Not-ready addresses are published too, so the
+# page can say "no Wi-Fi monitor" rather than just "unreachable".
+apiVersion: v1
+kind: Service
+metadata:
+  name: overwatch-wifi
+  namespace: overwatch
+spec:
+  selector:
+    app: overwatch-wifi
+  publishNotReadyAddresses: true
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8791

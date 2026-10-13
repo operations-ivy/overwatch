@@ -1,14 +1,15 @@
 """The web pods: the page at overwatch.brick.nozdormu.cloud and its stream.
 
-They hold no Bluetooth and no state of their own: each one keeps a single
-Server-Sent Events connection to the scanner and passes every change on to
-its browsers the moment it arrives, so any replica gives the same page.
+They hold no radio and no state of their own: each one keeps a Server-Sent
+Events connection to the scanner, and one to the Wi-Fi watch if there is one,
+and passes every change on to its browsers the moment it arrives, so any
+replica gives the same page.
 Ready once the first state has arrived, so a rollout keeps the old pods
 serving until a new one has something to show. After that a pod stays ready
 if the scanner goes away, and the page says so.
 
     GET /            the page
-    GET /api/stream  Server-Sent Events: {error, scanner} now, then each change
+    GET /api/stream  Server-Sent Events: {error, scanner, wifi_error, wifi} now, then each change
     GET /api/state   the same, once, plus `now`
     GET /health      the process is up
     GET /ready       has heard from the scanner at least once
@@ -34,12 +35,14 @@ class Upstream:
     """The scanner's stream, relayed into `hub`. The scanner sends a heartbeat
     every few seconds, so silence for `timeout` means it's gone."""
 
-    def __init__(self, url: str, hub: Hub, timeout: float = 15, retry: float = 1):
+    def __init__(self, url: str, hub: Hub, timeout: float = 15, retry: float = 1, on_change=None, name="scanner"):
         self.url, self.hub, self.timeout, self.retry = url.rstrip("/") + "/api/stream", hub, timeout, retry
+        self.name = name
         self.scanner: dict | None = None
         self.error = ""
         self.ready = False
-        hub.publish(self.state())
+        self.on_change = on_change or (lambda: hub.publish(self.state()))
+        self.on_change()
 
     def state(self) -> dict:
         return {"error": self.error, "scanner": self.scanner}
@@ -53,19 +56,48 @@ class Upstream:
                         continue  # heartbeat
                     self.scanner = json.loads(data)
                     if self.error:
-                        log.info("scanner back")
+                        log.info("%s back", self.name)
                     self.error, self.ready = "", True
-                    self.hub.publish(self.state())
+                    self.on_change()
         except Exception as e:  # scanner restarting, moved, or not up yet
             if not self.error:
-                log.warning("scanner unreachable: %s", e)
-        self.error = "scanner unreachable"
-        self.hub.publish(self.state())
+                log.warning("%s unreachable: %s", self.name, e)
+        self.error = f"{self.name} unreachable"
+        self.on_change()
 
     def run(self) -> None:
         while True:
             self.follow_once()
             time.sleep(self.retry)
+
+
+class Relay:
+    """Both feeds as one state. Ready on the Bluetooth scanner alone: the
+    Wi-Fi watch runs wherever the dongle is plugged in, which may be nowhere."""
+
+    def __init__(self, scanner_url: str, wifi_url: str, hub: Hub, **kw):
+        self.hub, self.ble, self.wifi = hub, None, None
+        self.ble = Upstream(scanner_url, hub, on_change=self.publish, **kw)
+        if wifi_url:
+            self.wifi = Upstream(wifi_url, hub, on_change=self.publish, name="Wi-Fi watch", **kw)
+        self.publish()
+
+    @property
+    def ready(self) -> bool:
+        return self.ble.ready
+
+    def publish(self) -> None:
+        if self.ble is None:
+            return  # still starting
+        state = self.ble.state()
+        if self.wifi:
+            state.update(wifi_error=self.wifi.error, wifi=self.wifi.scanner)
+        self.hub.publish(state)
+
+    def run(self) -> None:
+        if self.wifi:
+            threading.Thread(target=self.wifi.run, daemon=True).start()
+        self.ble.run()
 
 
 def make_server(upstream: Upstream, hub: Hub, host: str, port: int, heartbeat: float = 5) -> ThreadingHTTPServer:
@@ -116,9 +148,9 @@ def make_server(upstream: Upstream, hub: Hub, host: str, port: int, heartbeat: f
     return ThreadingHTTPServer((host, port), Handler)
 
 
-def main(host: str, port: int, scanner_url: str) -> None:
+def main(host: str, port: int, scanner_url: str, wifi_url: str = "") -> None:
     hub = Hub()
-    upstream = Upstream(scanner_url, hub)
-    threading.Thread(target=upstream.run, daemon=True).start()
-    log.info("web on %s:%d, following %s", host, port, upstream.url)
-    make_server(upstream, hub, host, port).serve_forever()
+    relay = Relay(scanner_url, wifi_url, hub)
+    threading.Thread(target=relay.run, daemon=True).start()
+    log.info("web on %s:%d, following %s%s", host, port, relay.ble.url, f" and {relay.wifi.url}" if relay.wifi else "")
+    make_server(relay, hub, host, port).serve_forever()

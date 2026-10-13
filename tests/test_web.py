@@ -98,3 +98,54 @@ class WebTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b"<title>overwatch", body)
         self.assertIn(b'new EventSource("/api/stream")', body)
+
+
+class RelayTests(unittest.TestCase):
+    """A web pod following a real scanner and a real Wi-Fi watch server."""
+
+    def setUp(self):
+        from overwatch.wifi import WifiWatch
+
+        self.watch, self.wifi = Watch(learn_seconds=0, started=0), WifiWatch()
+        self.watch.scanning = self.wifi.scanning = True
+        hubs = Hub(), Hub()
+        self.scanner_url, stop1 = serve(scanner_server(self.watch, hubs[0], "127.0.0.1", 0, heartbeat=0.2))
+        self.wifi_url, stop2 = serve(scanner_server(self.wifi, hubs[1], "127.0.0.1", 0, heartbeat=0.2))
+        self.addCleanup(stop1)
+        self.addCleanup(stop2)
+        self.wifi_hub = hubs[1]
+
+    def test_both_feeds_reach_the_page_and_a_threat_arrives_live(self):
+        from overwatch.wifi import Network, parse
+        from tests.test_wifi import OTHER_AP, beacon
+
+        hub = Hub()
+        relay = web.Relay(self.scanner_url, self.wifi_url, hub, timeout=1, retry=0.05)
+        base, stop = serve(web.make_server(relay, hub, "127.0.0.1", 0, heartbeat=0.2))
+        self.addCleanup(stop)
+        threading.Thread(target=relay.run, daemon=True).start()
+        deadline = time.time() + 3
+        while time.time() < deadline and not (relay.ready and relay.wifi.ready):
+            time.sleep(0.01)
+        _, st = get_json(base + "/api/state")
+        self.assertEqual((st["wifi_error"], st["wifi"]["threats"]), ("", []))
+        self.wifi.home = [Network("home", "Castle", set(), "WPA2", set())]
+        self.wifi.heard(parse(beacon(OTHER_AP, "Castle")), -40, 6)
+        self.wifi_hub.publish(state(self.wifi))
+        deadline = time.time() + 3
+        while time.time() < deadline:
+            _, st = get_json(base + "/api/state")
+            if st["wifi"]["threats"]:
+                break
+            time.sleep(0.01)
+        self.assertEqual(st["wifi"]["threats"][0]["kind"], "twin")
+
+    def test_ready_without_a_wifi_watch(self):
+        hub = Hub()
+        relay = web.Relay(self.scanner_url, "http://127.0.0.1:9", hub, timeout=1, retry=0.05)
+        threading.Thread(target=relay.run, daemon=True).start()
+        deadline = time.time() + 3
+        while time.time() < deadline and not (relay.ready and relay.wifi.error):
+            time.sleep(0.01)
+        self.assertTrue(relay.ready)
+        self.assertEqual(json.loads(hub.latest())["wifi_error"], "Wi-Fi watch unreachable")

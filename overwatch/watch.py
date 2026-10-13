@@ -1,9 +1,9 @@
 """What the scanner hears: which Bluetooth LE adverts are trackers or
 surveillance gadgets, and whether there are more of a kind than usual.
 
-Signatures come from the Bluetooth SIG's assigned numbers and published
-protocol notes; which ones to look for follows SquachWatch-CYD's list, but no
-data is copied from it. Each has a confidence:
+Signatures come from the Bluetooth SIG's assigned numbers, the IEEE OUI
+registry and published protocol specs; which ones to look for follows
+SquachWatch-CYD's list, but no data is copied from it. Each has a confidence:
 only high and medium ones raise alerts.
 
 Privacy: device addresses never leave this process. Each one is hashed with a
@@ -46,22 +46,37 @@ KINDS = {
         Kind("smarttag", "Samsung SmartTag", "high"),
         Kind("tile", "Tile tracker", "high"),
         Kind("googletag", "Google Find My tag", "medium"),
+        Kind("axon", "Axon device (body camera?)", "high"),
+        Kind("drone", "Remote ID drone", "high"),
         Kind("meta", "Meta device (glasses?)", "medium"),
+        Kind("spectacles", "Snap device (Spectacles?)", "medium"),
         Kind("flipper", "Flipper Zero", "high"),
         Kind("flipperish", "Flipper-like service", "low"),
         Kind("skimmer", "Serial BT module (skimmer?)", "low"),
+        Kind("ibeacon", "iBeacon (shop beacon?)", "low"),
     )
 }
 
 TRACKERS = ("findmy", "smarttag", "tile", "googletag")  # the rest are gadgets
-APPLE, FINDMY_TYPE = 0x004C, 0x12
+APPLE, FINDMY_TYPE, IBEACON = 0x004C, 0x12, b"\x02\x15"  # iBeacon: Apple's spec, type 0x02, length 0x15
+# Company identifiers (Bluetooth SIG): Meta, Meta Platforms Technologies and
+# Luxottica (Ray-Ban and Oakley Meta glasses); Snap; Flipper Devices.
+META_COMPANIES, SNAP, FLIPPER = (0x01AB, 0x058E, 0x0D53), 0x03C2, 0x0E29
+AXON_OUI = "00:25:DF"  # IEEE MA-L: Axon Enterprise, Inc.
+REMOTE_ID, REMOTE_ID_APP = 0xFFFA, 0x0D  # ASTM F3411 Remote ID over BLE: service data, app code 0x0D
 SKIMMER_NAMES = ("HC-05", "HC-06", "HC-08", "BT04-A", "RNBT-")
 
 
 def classify(
-    name: str | None, manufacturer: dict[int, bytes], services: list[str], service_data: dict[str, bytes]
+    name: str | None,
+    manufacturer: dict[int, bytes],
+    services: list[str],
+    service_data: dict[str, bytes],
+    address: str = "",
+    address_type: str = "",
 ) -> str | None:
-    """The kind of one advert, or None for everything else."""
+    """The kind of one advert, or None for everything else. A maker's OUI only
+    means something in a public address: random ones can start with anything."""
     name = name or ""
     services = [s.lower() for s in services] + [s.lower() for s in service_data]
     apple = manufacturer.get(APPLE)
@@ -74,14 +89,22 @@ def classify(
     fmdn = service_data.get(uuid16(0xFEAA)) or b""
     if fmdn[:1] in (b"\x40", b"\x41"):
         return "googletag"  # Eddystone frame types Google's Find My Device network uses
-    if uuid16(0xFD5F) in services:
+    if address_type == "public" and address.upper().startswith(AXON_OUI):
+        return "axon"
+    if (service_data.get(uuid16(REMOTE_ID)) or b"")[:1] == bytes([REMOTE_ID_APP]):
+        return "drone"
+    if uuid16(0xFD5F) in services or any(c in manufacturer for c in META_COMPANIES):
         return "meta"
-    if name.startswith("Flipper "):
+    if SNAP in manufacturer:
+        return "spectacles"
+    if name.startswith("Flipper ") or FLIPPER in manufacturer:
         return "flipper"
     if any(uuid16(n) in services for n in (0x3081, 0x3082, 0x3083)):
         return "flipperish"
     if name.startswith(SKIMMER_NAMES):
         return "skimmer"
+    if apple and apple[:2] == IBEACON and len(apple) >= 23:
+        return "ibeacon"
     return None
 
 
@@ -92,6 +115,10 @@ COMPANIES = {
     0x0075: "Samsung",
     0x00E0: "Google",
     0x01AB: "Meta",
+    0x058E: "Meta Platforms Technologies",
+    0x0D53: "Luxottica",
+    0x03C2: "Snap",
+    0x0E29: "Flipper Devices",
     0x0006: "Microsoft",
     0x0059: "Nordic Semiconductor",
     0x0157: "Huami",
@@ -107,6 +134,7 @@ SERVICES = {
     0x3082: "Flipper-like",
     0x3083: "Flipper-like",
     0xFE2C: "Google Fast Pair",
+    0xFFFA: "ASTM Remote ID",
     0x180F: "Battery",
     0x180A: "Device Information",
     0xFFE0: "Serial (HM-10)",

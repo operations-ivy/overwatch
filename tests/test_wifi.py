@@ -1,0 +1,201 @@
+from __future__ import annotations
+
+import itertools
+import json
+import struct
+import tempfile
+import unittest
+
+from overwatch.wifi import (
+    BEACON,
+    DEAUTH,
+    PROBE_RESP,
+    Network,
+    WifiWatch,
+    load_home,
+    parse,
+    radiotap,
+    schedule,
+)
+
+HOME_AP, OTHER_AP, CLIENT = "02:00:00:00:00:01", "02:00:00:00:00:99", "02:00:00:00:00:42"
+WPA2_RSN = (
+    bytes([1, 0]) + b"\x00\x0f\xac\x04" + bytes([1, 0]) + b"\x00\x0f\xac\x04" + bytes([1, 0]) + b"\x00\x0f\xac\x02"
+)
+WPA3_RSN = WPA2_RSN[:-1] + b"\x08"
+
+
+def b(addr: str) -> bytes:
+    return bytes.fromhex(addr.replace(":", ""))
+
+
+def ie(eid: int, body: bytes) -> bytes:
+    return bytes([eid, len(body)]) + body
+
+
+def mgmt(subtype: int, receiver: str, transmitter: str, bssid: str, body: bytes = b"") -> bytes:
+    return bytes([subtype << 4, 0]) + b"\x00\x00" + b(receiver) + b(transmitter) + b(bssid) + b"\x00\x00" + body
+
+
+def beacon(bssid: str, ssid: str, rsn: bytes | None = WPA2_RSN, channel: int = 6, subtype: int = BEACON) -> bytes:
+    capability = 0x0411 if rsn else 0x0401
+    body = bytes(8) + struct.pack("<HH", 100, capability) + ie(0, ssid.encode()) + ie(3, bytes([channel]))
+    if rsn:
+        body += ie(48, rsn)
+    return mgmt(subtype, "ff:ff:ff:ff:ff:ff", bssid, bssid, body)
+
+
+def deauth(bssid: str, receiver: str = CLIENT) -> bytes:
+    return mgmt(DEAUTH, receiver, bssid, bssid, b"\x07\x00")
+
+
+def captured(frame: bytes, freq: int = 2437, signal: int = -48, fcs: bool = True) -> bytes:
+    """A radiotap header as rtw88 sends it: flags, rate, channel, signal, with
+    an FCS on the end."""
+    present = (1 << 1) | (1 << 2) | (1 << 3) | (1 << 5)
+    fields = bytes([0x10 if fcs else 0, 2]) + struct.pack("<HH", freq, 0x00A0) + struct.pack("<b", signal)
+    header = struct.pack("<BBHI", 0, 0, 8 + len(fields), present) + fields
+    return header + frame + (b"\xde\xad\xbe\xef" if fcs else b"")
+
+
+HOME = [Network("home", "Castle", {HOME_AP}, "WPA2", {6, 149})]
+
+
+class ParseTests(unittest.TestCase):
+    def test_radiotap_signal_channel_and_fcs(self):
+        frame = beacon(HOME_AP, "Castle")
+        signal, channel, raw = radiotap(captured(frame, freq=5745, signal=-61))
+        self.assertEqual((signal, channel, raw), (-61, 149, frame))
+
+    def test_radiotap_with_an_extra_presence_word(self):
+        frame = deauth(HOME_AP)
+        present = (1 << 5) | (1 << 31)
+        buf = struct.pack("<BBHII", 0, 0, 13, present, 0) + struct.pack("<b", -70) + frame
+        self.assertEqual(radiotap(buf), (-70, 0, frame))
+
+    def test_beacon_fields_and_security(self):
+        f = parse(beacon(HOME_AP, "Castle", channel=11))
+        self.assertEqual((f.subtype, f.bssid, f.ssid, f.security, f.channel), (BEACON, HOME_AP, "Castle", "WPA2", 11))
+        self.assertEqual(parse(beacon(HOME_AP, "Castle", rsn=WPA3_RSN)).security, "WPA3")
+        self.assertEqual(parse(beacon(HOME_AP, "Castle", rsn=None)).security, "open")
+
+    def test_transition_mode(self):
+        rsn = WPA2_RSN[:-6] + bytes([2, 0]) + b"\x00\x0f\xac\x02" + b"\x00\x0f\xac\x08"
+        self.assertEqual(parse(beacon(HOME_AP, "Castle", rsn=rsn)).security, "WPA2/WPA3")
+
+    def test_hidden_networks_and_data_frames(self):
+        self.assertIsNone(parse(beacon(HOME_AP, "\x00\x00\x00")).ssid)
+        self.assertIsNone(parse(bytes([0x08, 0x01]) + bytes(22)))  # a data frame
+        self.assertIsNone(parse(b"\x80\x00"))  # too short
+
+
+class WatchTests(unittest.TestCase):
+    def setUp(self):
+        self.w = WifiWatch(HOME, deauth_frames=10, deauth_seconds=5)
+
+    def hear(self, frame: bytes, t: float, channel: int = 6, rssi: int = -50):
+        self.w.heard(parse(frame), rssi, channel, now=t)
+
+    def kinds(self, t: float) -> list[tuple[str, str]]:
+        return [(x["kind"], x["confidence"]) for x in self.w.get(now=t)["threats"]]
+
+    def test_the_house_itself_is_no_threat(self):
+        for t in range(30):
+            self.hear(beacon(HOME_AP, "Castle"), t)
+            self.hear(beacon(OTHER_AP, "Neighbours"), t)
+            if t % 10 == 0:
+                self.hear(deauth(HOME_AP), t)  # a client leaving now and then
+        st = self.w.get(now=30)
+        self.assertEqual((st["threats"], st["alerts"], st["aps"]), ([], [], 2))
+
+    def test_a_deauth_flood_on_the_house_alerts_once(self):
+        for i in range(40):
+            self.hear(deauth(HOME_AP, "ff:ff:ff:ff:ff:ff"), 100 + i * 0.1)
+        st = self.w.get(now=104)
+        self.assertEqual(self.kinds(104), [("deauth", "high")])
+        t = st["threats"][0]
+        self.assertEqual((t["target"], t["frames"], t["broadcast"]), ("home", 40, True))
+        self.assertEqual(len(st["alerts"]), 1)
+        self.assertIn("against home", st["alerts"][0]["detail"])
+
+    def test_a_flood_on_a_neighbour_is_medium(self):
+        for i in range(12):
+            self.hear(deauth(OTHER_AP), i * 0.2)
+        self.assertEqual(self.kinds(3), [("deauth", "medium")])
+        self.assertEqual(self.w.get(now=3)["threats"][0]["target"], "a neighbour's network")
+
+    def test_slow_deauths_are_not_a_flood(self):
+        for i in range(30):
+            self.hear(deauth(HOME_AP), i)  # one a second
+        self.assertEqual(self.kinds(30), [])
+
+    def test_a_twin_with_another_bssid(self):
+        self.hear(beacon(OTHER_AP, "Castle", rsn=None), 10)
+        self.assertEqual(self.kinds(10), [("twin", "high")])
+        self.assertIn("isn't the house's (open)", self.w.get(now=10)["threats"][0]["reason"])
+
+    def test_the_house_bssid_with_weaker_security(self):
+        self.hear(beacon(HOME_AP, "Castle", rsn=None), 10)
+        self.assertEqual(self.kinds(10), [("twin", "high")])
+        self.assertIn("offering open, not WPA2", self.w.get(now=10)["threats"][0]["reason"])
+
+    def test_the_house_bssid_on_a_channel_it_doesnt_use(self):
+        self.hear(beacon(HOME_AP, "Castle", channel=1), 10, channel=1)
+        self.assertEqual(self.kinds(10), [("twin", "medium")])
+
+    def test_karma_answers_for_many_networks(self):
+        for i, ssid in enumerate(["Starbucks", "Airport", "attwifi", "xfinitywifi"]):
+            self.hear(beacon(OTHER_AP, ssid, subtype=PROBE_RESP), i)
+        self.assertEqual(self.kinds(4), [("karma", "high")])
+
+    def test_threats_go_after_gone_seconds_and_alerts_after_30_min(self):
+        self.hear(beacon(OTHER_AP, "Castle"), 0)
+        self.assertEqual(len(self.w.get(now=100)["threats"]), 1)
+        self.assertEqual(self.w.get(now=121)["threats"], [])
+        self.assertEqual(len(self.w.get(now=1799)["alerts"]), 1)
+        self.assertEqual(self.w.get(now=1801)["alerts"], [])
+
+    def test_no_addresses_or_ssids_leave(self):
+        self.hear(beacon(OTHER_AP, "Castle"), 0)
+        for i in range(12):
+            self.hear(deauth(HOME_AP), i * 0.1)
+        text = json.dumps(self.w.get(now=2))
+        for secret in (HOME_AP, OTHER_AP, CLIENT, "Castle"):
+            self.assertNotIn(secret, text)
+
+
+class HomeAndScheduleTests(unittest.TestCase):
+    def test_load_home(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
+            json.dump(
+                {
+                    "networks": [
+                        {
+                            "name": "home",
+                            "ssid": "Castle",
+                            "bssids": ["02:00:00:00:00:AA"],
+                            "security": "WPA3",
+                            "channels": [6],
+                        }
+                    ]
+                },
+                f,
+            )
+            f.flush()
+            (n,) = load_home(f.name)
+        self.assertEqual((n.name, n.bssids, n.security, n.channels), ("home", {"02:00:00:00:00:aa"}, "WPA3", {6}))
+
+    def test_sixty_percent_at_home(self):
+        hops = list(itertools.islice(schedule([6, 149], home_share=0.6), 1000))
+        home = sum(s for c, s in hops if c in (6, 149))
+        self.assertAlmostEqual(home / sum(s for _, s in hops), 0.6, places=2)
+        others = {c for c, _ in hops if c not in (6, 149)}
+        self.assertEqual(len(others), 13 + 25 - 2)  # every other channel gets a look
+
+    def test_no_house_channels_hops_evenly(self):
+        hops = list(itertools.islice(schedule([]), 38))
+        self.assertEqual(len({c for c, _ in hops}), 38)
+
+
+if __name__ == "__main__":
+    unittest.main()

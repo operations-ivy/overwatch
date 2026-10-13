@@ -235,7 +235,7 @@ const SHAPES = {
   chip: ["0 0 24 24", '<g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 12h4" /> <path d="M10 17h4" /> <path d="M10 7h4" /> <path d="M18 12h2" /> <path d="M18 18h2" /> <path d="M18 6h2" /> <path d="M4 12h2" /> <path d="M4 18h2" /> <path d="M4 6h2" /> <rect x="6" y="2" width="12" height="20" rx="2" /></g>'],
 };
 const KIND_ICON = { findmy: "apple", smarttag: "samsung", tile: "tile", googletag: "google", meta: "meta",
-  flipper: "dolphin", flipperish: "dolphin", skimmer: "chip" };
+  flipper: "dolphin", flipperish: "dolphin", skimmer: "chip", ibeacon: "apple" };
 const SVGNS = "http://www.w3.org/2000/svg";
 function icon(k) {
   const [vb, body] = SHAPES[KIND_ICON[k.kind]] || SHAPES.bluetooth;

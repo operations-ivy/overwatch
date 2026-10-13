@@ -16,12 +16,20 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(classify("Flipper Zorbo", {}, [], {}), "flipper")
         self.assertEqual(classify(None, {}, [uuid16(0x3082)], {}), "flipperish")
         self.assertEqual(classify("HC-05", {}, [], {}), "skimmer")
+        self.assertEqual(classify(None, {}, [], {}, "00:25:df:12:34:56", "public"), "axon")
+        self.assertEqual(classify(None, {}, [], {uuid16(0xFFFA): b"\x0d\x01" + bytes(25)}), "drone")
+        self.assertEqual(classify(None, {0x0D53: b"\x01"}, [], {}), "meta")
+        self.assertEqual(classify(None, {0x03C2: b"\x01"}, [], {}), "spectacles")
+        self.assertEqual(classify(None, {0x0E29: b"\x01"}, [], {}), "flipper")
+        self.assertEqual(classify(None, {0x004C: b"\x02\x15" + bytes(21)}, [], {}), "ibeacon")
 
     def test_everyday_devices_are_ignored(self):
         self.assertIsNone(classify(None, {0x004C: bytes([0x10, 0x05])}, [], {}))  # an iPhone's nearby info
         self.assertIsNone(classify("JBL Flip 5", {0x0057: b"\x01"}, [], {}))
         self.assertIsNone(classify(None, {}, [], {uuid16(0xFEAA): b"\x10url"}))  # a plain Eddystone URL beacon
         self.assertIsNone(classify(None, {0x004C: b""}, [], {}))
+        self.assertIsNone(classify(None, {}, [], {}, "00:25:DF:12:34:56", "random"))  # a random address, not Axon's
+        self.assertIsNone(classify(None, {}, [], {uuid16(0xFFFA): b"\x01"}))  # 0xFFFA, but not Remote ID's app code
 
 
 class WatchTests(unittest.TestCase):

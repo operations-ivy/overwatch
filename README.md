@@ -15,14 +15,21 @@ Each kind has a confidence; only high and medium ones raise alerts.
 | Samsung SmartTag | service `0xFD5A` | high |
 | Tile tracker | services `0xFEED` / `0xFEEC` | high |
 | Google Find My tag | Eddystone frames `0x40` / `0x41` | medium |
-| Meta device (glasses?) | service `0xFD5F` | medium |
-| Flipper Zero | name `Flipper …` | high |
+| Axon device (body camera?) | OUI `00:25:DF` (Axon Enterprise), public addresses only | high |
+| Remote ID drone | service data `0xFFFA`, ASTM F3411 app code `0x0D` | high |
+| Meta device (glasses?) | service `0xFD5F`; companies Meta `0x01AB`, `0x058E`, Luxottica `0x0D53` | medium |
+| Snap device (Spectacles?) | company Snap `0x03C2` | medium |
+| Flipper Zero | name `Flipper …`, or company Flipper Devices `0x0E29` | high |
 | Flipper-like service | services `0x3081`–`0x3083` | low |
 | Serial BT module (skimmer?) | names `HC-05`, `HC-06`, … | low |
+| iBeacon (shop beacon?) | Apple manufacturer data, iBeacon type `0x02 0x15` | low |
 
-Signatures come from the Bluetooth SIG's assigned numbers and published
-protocol notes; which devices to look for follows SquachWatch-CYD, but none of
-its data is copied.
+Signatures come from the Bluetooth SIG's assigned numbers, the IEEE OUI
+registry and published protocol specs (ASTM F3411, Apple's iBeacon); which
+devices to look for follows SquachWatch-CYD, but none of its data is copied.
+SquachWatch signatures with no primary source (Flock and Raven, most of its
+OUI prefixes) are left out, and Wi-Fi ones need a radio overwatch doesn't
+have.
 
 Households are full of trackers, so for 10 minutes after each start overwatch
 learns the usual count of each kind. After that, a high or medium kind above

@@ -48,10 +48,11 @@ def scan_forever(watch: Watch, hub: Hub, retry_seconds: float = 30) -> None:
 
     def on_advert(device, adv) -> None:
         mfr, services, sdata = dict(adv.manufacturer_data), list(adv.service_uuids), dict(adv.service_data)
-        kind = classify(adv.local_name, mfr, services, sdata)
+        atype = address_type(device)
+        kind = classify(adv.local_name, mfr, services, sdata, device.address, atype)
         if kind:
             details = describe(kind, adv.local_name, mfr, services, sdata, adv.tx_power)
-            watch.advert(device.address, kind, adv.rssi, details=details, address_type=address_type(device))
+            watch.advert(device.address, kind, adv.rssi, details=details, address_type=atype)
             hub.publish(state(watch))
 
     async def scan() -> None:

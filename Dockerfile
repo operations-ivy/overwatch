@@ -1,5 +1,5 @@
-# Built and pushed by brick9000/build-image in brick-cicd-config:
-#   build-image https://github.com/operations-ivy/overwatch main whitepatrick/overwatch:<version>
+# Built and pushed by brick-cicd-config's build-image Jenkins job (a
+# reproducible rootless BuildKit build on brick2000): IMAGE=whitepatrick/overwatch, REF=<full commit>, TAG=<version>.
 #
 # One image, three roles (k8s_config/): `scan`, `wifi` and `web`. The base image is
 # pinned by digest and dependencies come from poetry.lock. Bump the base
@@ -20,7 +20,17 @@ RUN python -m venv --without-pip /venv && poetry install --no-root --only main
 
 FROM ${PYTHON}
 # iw and ip for the Wi-Fi watch: monitor mode and channel hops on the dongle.
-RUN apt-get update && apt-get install -y --no-install-recommends iw iproute2 && rm -rf /var/lib/apt/lists/*
+# iw and iproute2 for the Wi-Fi watch. Reproducible: apt reads a fixed
+# snapshot.debian.org date (not the live mirrors, whose versions move), and the
+# logs and caches apt and dpkg write (stamped with the build's clock) are
+# removed. Bump SNAPSHOT deliberately to take Debian updates.
+ARG SNAPSHOT=20261013T000000Z
+RUN rm -f /etc/apt/sources.list.d/debian.sources \
+    && echo "deb http://snapshot.debian.org/archive/debian/${SNAPSHOT} bookworm main" > /etc/apt/sources.list \
+    && echo "deb http://snapshot.debian.org/archive/debian-security/${SNAPSHOT} bookworm-security main" >> /etc/apt/sources.list \
+    && apt-get -o Acquire::Check-Valid-Until=false update \
+    && apt-get install -y --no-install-recommends iw iproute2 \
+    && rm -rf /var/lib/apt/lists/* /var/log/* /var/cache/ldconfig/aux-cache /var/cache/debconf/*-old /var/lib/dpkg/*-old
 COPY --from=deps /venv /venv
 # Read-only root filesystem in the cluster, so no .pyc files.
 ENV VIRTUAL_ENV=/venv PATH=/venv/bin:$PATH PYTHONPATH=/code PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1

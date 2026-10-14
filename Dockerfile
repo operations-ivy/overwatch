@@ -1,5 +1,5 @@
-# Built and pushed by brick9000/build-image in brick-cicd-config:
-#   build-image https://github.com/operations-ivy/overwatch main whitepatrick/overwatch:<version>
+# Built and pushed by brick-cicd-config's build-image Jenkins job (a
+# reproducible rootless BuildKit build on brick2000): IMAGE=whitepatrick/overwatch, REF=<full commit>, TAG=<version>.
 #
 # One image, three roles (k8s_config/): `scan`, `wifi` and `web`. The base image is
 # pinned by digest and dependencies come from poetry.lock. Bump the base

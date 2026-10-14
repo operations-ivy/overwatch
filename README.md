@@ -184,9 +184,10 @@ poetry run python -m overwatch web   # OVERWATCH_SCANNER_URL=http://<scanner>
 
 1. Bump `version` in `pyproject.toml` and the image tag in both
    Deployments.
-2. Build on brick9000 (native arm64):
-   `build-image https://github.com/operations-ivy/overwatch <full commit or branch> whitepatrick/overwatch:<version>`
-   (brick-cicd-config `brick9000/build-image`).
+2. Build and push with brick-cicd-config's `build-image` Jenkins job:
+   `IMAGE=whitepatrick/overwatch`, `REF=<full commit>`, `TAG=<version>`. It
+   builds reproducibly and labels the image with the commit, which the
+   nightly `verify-images` job rebuilds and checks.
 3. `kubectl diff -f k8s_config/`, then `kubectl apply -f k8s_config/`.
 4. Check: `kubectl -n overwatch get pods -o wide` (one scanner on brick1982,
    two web pods on different nodes, all ready) and the page.

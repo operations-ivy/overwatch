@@ -1,0 +1,18 @@
+# Prometheus scrapes /metrics on every overwatch pod: the scanner, the Wi-Fi
+# watch and the web pods (overwatch/metrics.py). Counts only, never
+# addresses. The dashboard is metrics-dashboard.yaml.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: overwatch
+  namespace: overwatch
+spec:
+  selector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values: [overwatch-scanner, overwatch-wifi, overwatch-web]
+  podMetricsEndpoints:
+  - port: http
+    path: /metrics
+    interval: 30s

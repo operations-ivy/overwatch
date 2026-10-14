@@ -172,6 +172,22 @@ Inlined in the page, no requests at run time:
 - the chip (serial modules): [Lucide](https://lucide.dev) 1.48.0
   `microchip`, ISC.
 
+## Metrics
+
+Each pod serves `/metrics` (`overwatch/metrics.py`), scraped through
+`k8s_config/podmonitor.yaml`, and the "Overwatch" Grafana dashboard
+(`k8s_config/metrics-dashboard.yaml`) draws them. Counts only, never an
+address or a BSSID:
+
+- scanner: `overwatch_ble_*`: scanning, learning time left, devices nearby
+  and the learned normal per kind, the closest signal per kind, adverts,
+  alerts and scan failures.
+- Wi-Fi watch: `overwatch_wifi_*`: capturing, channel, access points heard,
+  threats now, management frames by subtype, alerts and capture failures.
+- web pods: `overwatch_web_upstream_up` and `_reconnects_total` per feed.
+- all three: `overwatch_stream_clients`, `overwatch_state_changes_total`,
+  `overwatch_http_requests_total`.
+
 ## Develop
 
 ```sh
@@ -183,7 +199,7 @@ poetry run python -m overwatch web   # OVERWATCH_SCANNER_URL=http://<scanner>
 ## Release
 
 1. Bump `version` in `pyproject.toml` and the image tag in both
-   Deployments.
+   Deployments and the DaemonSet.
 2. Build and push with brick-cicd-config's `build-image` Jenkins job:
    `IMAGE=whitepatrick/overwatch`, `REF=<full commit>`, `TAG=<version>`. It
    builds reproducibly and labels the image with the commit, which the

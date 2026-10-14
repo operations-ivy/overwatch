@@ -34,13 +34,14 @@ import struct
 import subprocess
 import threading
 import time
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
 
 BROADCAST = "ff:ff:ff:ff:ff:ff"
 BEACON, PROBE_RESP, DISASSOC, DEAUTH = 8, 5, 10, 12
+SUBTYPES = {BEACON: "beacon", PROBE_RESP: "probe_response", DISASSOC: "disassoc", DEAUTH: "deauth"}
 # Security from weakest to strongest; a twin offering less than the house is a downgrade.
 RANK = {"open": 0, "WEP": 1, "WPA": 2, "WPA2": 3, "WPA2-Enterprise": 3, "WPA2/WPA3": 4, "WPA3": 5}
 CHANNELS_24 = list(range(1, 14))
@@ -256,6 +257,10 @@ class WifiWatch:
         self.channel = 0
         self.error = ""
         self.scanning = False
+        # Running totals for /metrics (metrics.py).
+        self.frame_counts: Counter = Counter()
+        self.alert_counts: Counter = Counter()
+        self.failures = 0
         self._lock = threading.Lock()
 
     def _key(self, address: str) -> str:
@@ -275,6 +280,7 @@ class WifiWatch:
         t = self.threats.get((kind, key))
         if t is None or now - t.last > self.gone_seconds:
             t = self.threats[(kind, key)] = Threat(kind, self._number(key), now, now, confidence, target, reason)
+            self.alert_counts[kind] += 1
             self.alerts.append(
                 {
                     "kind": kind,
@@ -294,6 +300,7 @@ class WifiWatch:
     def heard(self, f: Frame, rssi: int | None, channel: int, now: float | None = None) -> None:
         now = time.time() if now is None else now
         with self._lock:
+            self.frame_counts[SUBTYPES.get(f.subtype, "other")] += 1
             if f.subtype in (DEAUTH, DISASSOC):
                 self._deauth(f, rssi, channel, now)
             elif f.subtype in (BEACON, PROBE_RESP):
@@ -490,6 +497,7 @@ def capture_forever(watch: WifiWatch, hub, iface: str, retry_seconds: float = 30
                     last_tick = now
         except Exception as e:  # no dongle, unplugged, no permission
             watch.error, watch.scanning = "no Wi-Fi monitor", False
+            watch.failures += 1
             hub.publish(state(watch))
             log.warning("capture failed: %s", e)
         time.sleep(retry_seconds)
@@ -527,6 +535,7 @@ def survey(iface: str, seconds: float) -> None:
 
 def main(host: str, port: int, iface: str, home_path: str, home_share: float = 0.6) -> None:
     from .hub import Hub
+    from .metrics import wifi_registry
     from .scanner import make_server
 
     home: list[Network] = []
@@ -539,4 +548,4 @@ def main(host: str, port: int, iface: str, home_path: str, home_share: float = 0
     threading.Thread(target=capture_forever, args=(watch, hub, iface), daemon=True).start()
     threading.Thread(target=hop_forever, args=(watch, iface, home_share), daemon=True).start()
     log.info("wifi watch on %s:%d", host, port)
-    make_server(watch, hub, host, port).serve_forever()
+    make_server(watch, hub, host, port, registry=wifi_registry).serve_forever()

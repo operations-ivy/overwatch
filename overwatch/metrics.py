@@ -15,7 +15,15 @@ from collections import Counter
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from prometheus_client.core import CollectorRegistry, CounterMetricFamily, GaugeMetricFamily
 
-__all__ = ["CONTENT_TYPE_LATEST", "Requests", "ble_registry", "render", "web_registry", "wifi_registry"]
+__all__ = [
+    "CONTENT_TYPE_LATEST",
+    "Requests",
+    "ble_registry",
+    "render",
+    "upnp_registry",
+    "web_registry",
+    "wifi_registry",
+]
 
 
 class Requests:
@@ -107,6 +115,33 @@ class _Wifi:
         )
 
 
+class _Upnp:
+    def __init__(self, watch):
+        self.watch = watch
+
+    def collect(self):
+        w = self.watch
+        state = w.get()
+        yield GaugeMetricFamily(
+            "overwatch_upnp_reachable",
+            "1 while the router answers UPnP (the last poll got its table).",
+            value=int(w.scanning),
+        )
+        yield GaugeMetricFamily(
+            "overwatch_upnp_mappings", "UPnP port forwards on the router now.", value=len(state["mappings"])
+        )
+        yield GaugeMetricFamily(
+            "overwatch_upnp_unexpected",
+            "UPnP port forwards now that aren't on the allowed list.",
+            value=state["unexpected"],
+        )
+        yield CounterMetricFamily(
+            "overwatch_upnp_opened", "UPnP port forwards that appeared while watching.", value=w.opened
+        )
+        yield _counter("overwatch_upnp_alerts", "Alerts raised: unexpected UPnP forwards.", "kind", w.alert_counts)
+        yield _counter("overwatch_upnp_polls", "Polls of the router's UPnP table, by result.", "result", w.polls)
+
+
 class _Web:
     def __init__(self, relay, hub):
         self.relay, self.hub = relay, hub
@@ -118,7 +153,7 @@ class _Web:
         reconnects = CounterMetricFamily(
             "overwatch_web_upstream_reconnects", "Times the feed's stream ended.", labels=["upstream"]
         )
-        for name, u in (("scanner", self.relay.ble), ("wifi", self.relay.wifi)):
+        for name, u in (("scanner", self.relay.ble), ("wifi", self.relay.wifi), ("upnp", self.relay.upnp)):
             if u is None:
                 continue
             up.add_metric([name], int(u.ready and not u.error))
@@ -160,6 +195,10 @@ def ble_registry(watch, hub, requests: Requests) -> CollectorRegistry:
 
 def wifi_registry(watch, hub, requests: Requests) -> CollectorRegistry:
     return _registry(_Wifi(watch), _Hub(hub), requests)
+
+
+def upnp_registry(watch, hub, requests: Requests) -> CollectorRegistry:
+    return _registry(_Upnp(watch), _Hub(hub), requests)
 
 
 def web_registry(relay, hub, requests: Requests) -> CollectorRegistry:

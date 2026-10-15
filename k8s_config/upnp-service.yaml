@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: overwatch-upnp
+  namespace: overwatch
+spec:
+  selector:
+    app: overwatch-upnp
+  publishNotReadyAddresses: true
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8792

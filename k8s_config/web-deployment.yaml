@@ -47,7 +47,7 @@ spec:
           type: RuntimeDefault
       containers:
       - name: web
-        image: whitepatrick/overwatch:0.6.0
+        image: whitepatrick/overwatch:0.7.0
         imagePullPolicy: IfNotPresent
         args: ["web"]
         ports:
@@ -58,6 +58,8 @@ spec:
           value: "http://overwatch-scanner.overwatch.svc.cluster.local"
         - name: OVERWATCH_WIFI_URL
           value: "http://overwatch-wifi.overwatch.svc.cluster.local"
+        - name: OVERWATCH_UPNP_URL
+          value: "http://overwatch-upnp.overwatch.svc.cluster.local"
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true

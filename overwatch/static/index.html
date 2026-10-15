@@ -188,6 +188,7 @@ footer{ font-family:var(--font-mono); font-size:11px; color:var(--text-faint); t
     <div class="links">
       <span>scanner <b class="idle" id="l-scanner">…</b></span>
       <span id="w-link" hidden>wi-fi <b class="idle" id="l-wifi">…</b></span>
+      <span id="u-link" hidden>upnp <b class="idle" id="l-upnp">…</b></span>
       <span>feed <b class="idle" id="l-data">connecting</b></span>
       <span>last change <b class="idle" id="l-changed">—</b></span>
     </div>
@@ -219,6 +220,15 @@ footer{ font-family:var(--font-mono); font-size:11px; color:var(--text-faint); t
         <tbody id="wifi"></tbody>
       </table>
       <div class="empty" id="wifi-empty" hidden></div>
+    </section>
+
+    <section class="panel" id="upnp-panel" hidden>
+      <div class="panel-head"><h2>UPNP FORWARDS</h2><span class="meta" id="upnp-meta">ports opened on the router by devices</span></div>
+      <table>
+        <thead><tr><th>Internet port → device</th><th class="num">Lease</th><th class="vh"></th></tr></thead>
+        <tbody id="upnp"></tbody>
+      </table>
+      <div class="empty" id="upnp-empty" hidden></div>
     </section>
    </div>
 
@@ -324,8 +334,10 @@ function render(st) {
   const s = st.scanner, now = Date.now() / 1000;
   const stale = Boolean(st.error);
   const w = st.wifi, hasWifi = "wifi" in st, threats = (w && w.threats) || [];
+  const u = st.upnp, hasUpnp = "upnp" in st, forwards = (u && u.mappings) || [];
+  const unexpected = forwards.filter(f => !f.allowed);
   const kinds = (s && s.kinds) || [];
-  const alerts = ((s && s.alerts) || []).concat((w && w.alerts) || []).sort((a, b) => b.at - a.at);
+  const alerts = ((s && s.alerts) || []).concat((w && w.alerts) || [], (u && u.alerts) || []).sort((a, b) => b.at - a.at);
   const learning = s && s.learning > 0;
   const above = kinds.filter(k => !learning && k.confidence !== "low" && k.count > k.normal);
   const fresh = alerts.find(a => now - a.at < 300);
@@ -333,6 +345,9 @@ function render(st) {
   $("w-link").hidden = !hasWifi;
   if (hasWifi) setLink("l-wifi", !w ? (st.wifi_error || "…") : st.wifi_error ? st.wifi_error : w.error ? w.error : w.scanning ? `ch ${w.channel || "…"}` : "starting",
                        !w || st.wifi_error || w.error ? "warn" : w.scanning ? "" : "idle");
+  $("u-link").hidden = !hasUpnp;
+  if (hasUpnp) setLink("l-upnp", !u ? (st.upnp_error || "…") : st.upnp_error ? st.upnp_error : u.error ? u.error : u.polled ? `${forwards.length} forward${forwards.length === 1 ? "" : "s"}` : "starting",
+                       !u || st.upnp_error || u.error ? "warn" : unexpected.length ? "warn" : u.polled ? "" : "idle");
   setLink("l-scanner", !s ? "…" : s.error ? s.error : s.scanning ? "scanning" : "starting", !s ? "idle" : s.error ? "warn" : s.scanning ? "" : "idle");
 
   // The headline: one word and one sentence.
@@ -343,6 +358,8 @@ function render(st) {
   else if (fresh) [word, cls, line] = ["ALERT", "bad", fresh.detail ? `${fresh.label}: ${fresh.detail} (${minsAgo(now - fresh.at)}).`
                                                              : `${fresh.count} × ${fresh.label}, usually ${fresh.normal} (${minsAgo(now - fresh.at)}).`];
   else if (threats.length) [word, cls, line] = ["HEADS UP", "bad", threats.map(t => `${t.label} (AP ${t.n}): ${t.reason}`).join(" · ")];
+  else if (unexpected.length) [word, cls, line] = ["HEADS UP", "bad", `${unexpected.length} UPnP port forward${unexpected.length === 1 ? "" : "s"} open that ${unexpected.length === 1 ? "isn't" : "aren't"} on the allowed list: ` +
+                                                    unexpected.map(f => `${f.protocol} ${f.external_port} → ${f.client}`).join(" · ")];
   else if (above.length) [word, cls, line] = ["HEADS UP", "idle", above.map(k => `${k.count} × ${k.label}, usually ${k.normal}`).join(" · ")];
   else if (learning) [word, cls, line] = ["LEARNING", "idle", `Learning what's normal here: ${Math.ceil(s.learning / 60)} min left.`];
   else [word, cls, line] = ["ALL CLEAR", "ok", kinds.length ? "Only the usual devices nearby." : "Nothing of interest nearby."];
@@ -408,6 +425,26 @@ function render(st) {
     }));
     $("wifi-empty").hidden = threats.length > 0;
     $("wifi-empty").textContent = !w ? "Waiting for the Wi-Fi watch…" : w.error ? `${w.error}.` : "No attacks heard.";
+  }
+
+  // UPnP: every forward on the router, unexpected ones first.
+  $("upnp-panel").hidden = !hasUpnp;
+  if (hasUpnp) {
+    $("upnp-meta").textContent = !u ? "…" : `${forwards.length} on the router · ${u.allowed_rules ? `${u.allowed_rules} allowed` : "none allowed"} · checked every minute`;
+    const ordered = unexpected.concat(forwards.filter(f => f.allowed));
+    $("upnp").replaceChildren(...ordered.map(f => {
+      const tr = el("tr"), what = el("td", "what"), text = el("div");
+      const since = f.since ? ` · seen ${minsAgo(now - f.since)}` : "";
+      text.append(el("div", "name", `${f.protocol} ${f.external_port} → ${f.client}:${f.internal_port}`),
+                  el("div", "sub", `${f.description || "no description"}${f.enabled ? "" : " · disabled"}${since}`));
+      what.append(text);
+      const verdict = el("td", "v");
+      verdict.append(el("span", `verdict ${f.allowed ? "idle" : "bad"}`, f.allowed ? "allowed" : "unexpected"));
+      tr.append(what, el("td", "num", f.lease ? duration(f.lease) : "∞"), verdict);
+      return tr;
+    }));
+    $("upnp-empty").hidden = forwards.length > 0;
+    $("upnp-empty").textContent = !u ? "Waiting for the UPnP watch…" : u.error ? `${u.error}.` : !u.polled ? "Asking the router…" : "No ports forwarded. Good.";
   }
 
   // A new alert (not one already there when the page opened) flashes the header for a minute.

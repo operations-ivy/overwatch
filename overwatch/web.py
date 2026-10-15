@@ -9,7 +9,7 @@ serving until a new one has something to show. After that a pod stays ready
 if the scanner goes away, and the page says so.
 
     GET /            the page
-    GET /api/stream  Server-Sent Events: {error, scanner, wifi_error, wifi} now, then each change
+    GET /api/stream  Server-Sent Events: {error, scanner, wifi_error, wifi, upnp_error, upnp} now, then each change
     GET /api/state   the same, once, plus `now`
     GET /health      the process is up
     GET /ready       has heard from the scanner at least once
@@ -75,14 +75,17 @@ class Upstream:
 
 
 class Relay:
-    """Both feeds as one state. Ready on the Bluetooth scanner alone: the
-    Wi-Fi watch runs wherever the dongle is plugged in, which may be nowhere."""
+    """Every feed as one state. Ready on the Bluetooth scanner alone: the
+    Wi-Fi watch runs wherever the dongle is plugged in, which may be nowhere,
+    and the UPnP watch is optional too."""
 
-    def __init__(self, scanner_url: str, wifi_url: str, hub: Hub, **kw):
-        self.hub, self.ble, self.wifi = hub, None, None
+    def __init__(self, scanner_url: str, wifi_url: str, hub: Hub, upnp_url: str = "", **kw):
+        self.hub, self.ble, self.wifi, self.upnp = hub, None, None, None
         self.ble = Upstream(scanner_url, hub, on_change=self.publish, **kw)
         if wifi_url:
             self.wifi = Upstream(wifi_url, hub, on_change=self.publish, name="Wi-Fi watch", **kw)
+        if upnp_url:
+            self.upnp = Upstream(upnp_url, hub, on_change=self.publish, name="UPnP watch", **kw)
         self.publish()
 
     @property
@@ -95,11 +98,14 @@ class Relay:
         state = self.ble.state()
         if self.wifi:
             state.update(wifi_error=self.wifi.error, wifi=self.wifi.scanner)
+        if self.upnp:
+            state.update(upnp_error=self.upnp.error, upnp=self.upnp.scanner)
         self.hub.publish(state)
 
     def run(self) -> None:
-        if self.wifi:
-            threading.Thread(target=self.wifi.run, daemon=True).start()
+        for feed in (self.wifi, self.upnp):
+            if feed:
+                threading.Thread(target=feed.run, daemon=True).start()
         self.ble.run()
 
 
@@ -158,9 +164,10 @@ def make_server(upstream, hub: Hub, host: str, port: int, heartbeat: float = 5) 
     return ThreadingHTTPServer((host, port), Handler)
 
 
-def main(host: str, port: int, scanner_url: str, wifi_url: str = "") -> None:
+def main(host: str, port: int, scanner_url: str, wifi_url: str = "", upnp_url: str = "") -> None:
     hub = Hub()
-    relay = Relay(scanner_url, wifi_url, hub)
+    relay = Relay(scanner_url, wifi_url, hub, upnp_url)
     threading.Thread(target=relay.run, daemon=True).start()
-    log.info("web on %s:%d, following %s%s", host, port, relay.ble.url, f" and {relay.wifi.url}" if relay.wifi else "")
+    feeds = [u.url for u in (relay.ble, relay.wifi, relay.upnp) if u]
+    log.info("web on %s:%d, following %s", host, port, ", ".join(feeds))
     make_server(relay, hub, host, port).serve_forever()

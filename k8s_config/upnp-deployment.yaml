@@ -1,0 +1,74 @@
+# The UPnP watch: lists the router's UPnP port forwards every minute and
+# alerts on any that aren't allowed (overwatch/upnp.py). One pod on any worker.
+# It finds the router by SSDP, which only answers on the LAN, so it uses the
+# host network; it needs nothing else: no capabilities, nobody, read-only.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: overwatch-upnp
+  namespace: overwatch
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # host port 8792: the old pod lets go first
+  selector:
+    matchLabels:
+      app: overwatch-upnp
+  template:
+    metadata:
+      labels:
+        app: overwatch-upnp
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: upnp
+        image: whitepatrick/overwatch:0.7.0
+        imagePullPolicy: IfNotPresent
+        args: ["upnp"]
+        ports:
+        - name: http
+          containerPort: 8792
+        env:
+        - name: OVERWATCH_PORT
+          value: "8792"
+        - name: OVERWATCH_UPNP_ROUTER
+          value: "192.168.1.1"
+        # Forwards that don't alert: PROTO/PORT[@CLIENT], comma-separated
+        # (README, "UPnP"). Empty: every forward alerts.
+        - name: OVERWATCH_UPNP_ALLOW
+          value: ""
+        - name: OVERWATCH_UPNP_INTERVAL
+          value: "60"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 200m
+            memory: 96Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8792
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        # Ready once it has read the router's table.
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8792
+          initialDelaySeconds: 3
+          periodSeconds: 5

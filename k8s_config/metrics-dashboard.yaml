@@ -1382,7 +1382,7 @@ data:
         },
         {
           "type": "row",
-          "title": "Web pods and streams",
+          "title": "UPnP (the router's port forwards)",
           "collapsed": false,
           "panels": [],
           "gridPos": {
@@ -1390,6 +1390,416 @@ data:
             "w": 24,
             "x": 0,
             "y": 48
+          },
+          "id": 30
+        },
+        {
+          "type": "stat",
+          "title": "Router",
+          "description": "1 while the router answers UPnP and its table was read.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max(overwatch_upnp_reachable)",
+              "instant": true,
+              "legendFormat": ""
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "0": {
+                      "text": "Not answering",
+                      "color": "orange",
+                      "index": 0
+                    },
+                    "1": {
+                      "text": "Answering",
+                      "color": "green",
+                      "index": 1
+                    }
+                  }
+                }
+              ]
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "auto",
+            "justifyMode": "auto",
+            "orientation": "auto"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 49
+          },
+          "id": 31
+        },
+        {
+          "type": "stat",
+          "title": "Forwards",
+          "description": "UPnP port forwards on the router now (allowed or not).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max(overwatch_upnp_mappings)",
+              "instant": true,
+              "legendFormat": ""
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "none",
+            "graphMode": "none",
+            "textMode": "auto",
+            "justifyMode": "auto",
+            "orientation": "auto"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 49
+          },
+          "id": 32
+        },
+        {
+          "type": "stat",
+          "title": "Unexpected",
+          "description": "Forwards open now that aren't on the allowed list: something on the LAN opened a port to the internet.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max(overwatch_upnp_unexpected)",
+              "instant": true,
+              "legendFormat": ""
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "auto",
+            "justifyMode": "auto",
+            "orientation": "auto"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 12,
+            "y": 49
+          },
+          "id": 33
+        },
+        {
+          "type": "stat",
+          "title": "Opened, 24h",
+          "description": "Forwards that appeared in the last 24 hours.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(increase(overwatch_upnp_opened_total[24h]))",
+              "instant": true,
+              "legendFormat": ""
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "none",
+            "graphMode": "none",
+            "textMode": "auto",
+            "justifyMode": "auto",
+            "orientation": "auto"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 18,
+            "y": 49
+          },
+          "id": 34
+        },
+        {
+          "type": "timeseries",
+          "title": "Forwards over time",
+          "description": "All forwards, and the unexpected ones.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max(overwatch_upnp_mappings)",
+              "legendFormat": "Forwards"
+            },
+            {
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max(overwatch_upnp_unexpected)",
+              "legendFormat": "Unexpected"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 0,
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 10,
+                "showPoints": "never",
+                "lineInterpolation": "stepAfter",
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "axisSoftMin": 0
+              },
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 16,
+            "x": 0,
+            "y": 53
+          },
+          "id": 35
+        },
+        {
+          "type": "timeseries",
+          "title": "Polls",
+          "description": "Reads of the router's table, per 10 minutes, by result.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (result) (increase(overwatch_upnp_polls_total[10m]))",
+              "legendFormat": "{{result}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 0,
+              "custom": {
+                "drawStyle": "bars",
+                "lineWidth": 2,
+                "fillOpacity": 60,
+                "showPoints": "never",
+                "lineInterpolation": "stepAfter",
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "axisSoftMin": 0
+              },
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 53
+          },
+          "id": 36
+        },
+        {
+          "type": "row",
+          "title": "Web pods and streams",
+          "collapsed": false,
+          "panels": [],
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 62
           },
           "id": 24
         },
@@ -1409,7 +1819,7 @@ data:
                 "uid": "prometheus"
               },
               "expr": "overwatch_web_upstream_up",
-              "legendFormat": "{{pod}} \u2192 {{upstream}}"
+              "legendFormat": "{{pod}} → {{upstream}}"
             }
           ],
           "fieldConfig": {
@@ -1450,7 +1860,7 @@ data:
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 49
+            "y": 63
           },
           "id": 25
         },
@@ -1510,7 +1920,7 @@ data:
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 49
+            "y": 63
           },
           "id": 26
         },
@@ -1570,7 +1980,7 @@ data:
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 49
+            "y": 63
           },
           "id": 27
         },
@@ -1630,7 +2040,7 @@ data:
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 57
+            "y": 71
           },
           "id": 28
         },
@@ -1690,7 +2100,7 @@ data:
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 57
+            "y": 71
           },
           "id": 29
         }
@@ -1710,7 +2120,7 @@ data:
       },
       "timepicker": {},
       "timezone": "browser",
-      "title": "Overwatch: Bluetooth and Wi-Fi watch",
+      "title": "Overwatch: Bluetooth, Wi-Fi and UPnP watch",
       "uid": "overwatch",
-      "version": 1
+      "version": 2
     }

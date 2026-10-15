@@ -11,7 +11,7 @@ spec:
     matchExpressions:
     - key: app
       operator: In
-      values: [overwatch-scanner, overwatch-wifi, overwatch-web]
+      values: [overwatch-scanner, overwatch-wifi, overwatch-upnp, overwatch-web]
   podMetricsEndpoints:
   - port: http
     path: /metrics

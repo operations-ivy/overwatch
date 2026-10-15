@@ -53,6 +53,30 @@ of its time on the house's channels and hops the rest of 2.4 and 5 GHz in
 between (the whole band in about 25 s), so a flood on the house is heard at
 once and a twin elsewhere within half a minute.
 
+### UPnP port forwards
+
+UPnP lets any device on the LAN ask the router to forward an internet port to
+it, with no password and no prompt. Consoles and some apps rely on it, but it
+also means malware on one device could open the house to the internet
+unnoticed. The UPnP watch lists the router's UPnP port forwards every minute:
+
+| Kind | How it's recognised | Confidence |
+| --- | --- | --- |
+| UPnP port forward | a forward on the router that isn't on the allowed list | high |
+
+Each one alerts when it appears ("opened"), or at the watch's start if it's
+already there ("found open"), and the page lists every forward with the
+device and port it reaches. brick9000's board pages on any unexpected
+forward (brick-cicd-config). Allowed forwards (`OVERWATCH_UPNP_ALLOW` in
+`k8s_config/upnp-deployment.yaml`) are comma-separated `PROTO/PORT[@CLIENT]`
+globs, e.g. `UDP/3074@192.168.1.50` for a console. Empty: everything alerts.
+
+The router is found by SSDP, as UPnP clients find it, but only an answer from
+the router's own address, pointing at its own address, is believed, so
+another device can't pose as the router with an empty table. Only UPnP error
+713 counts as the end of the table: a router answering with errors is "not
+answering", never "no forwards".
+
 Households are full of trackers, so for 10 minutes after each start overwatch
 learns the usual count of each kind. After that, a high or medium kind above
 its usual count for two minutes raises an alert. Only devices heard in the
@@ -101,6 +125,10 @@ One image (`whitepatrick/overwatch`), three roles, in the `overwatch` namespace:
   reach `wlmon0`) and runs as root with only `NET_ADMIN` (monitor mode,
   channel hops) and `NET_RAW` (reading frames), on host port 8791. Ready
   while it's capturing. The page works without it and says so.
+- **`overwatch-upnp`**: one pod on any worker, on the host network (SSDP
+  only answers on the LAN, host port 8792), as `nobody` with no
+  capabilities and a read-only root filesystem. Ready once it has read the
+  router's table. The page works without it and says so.
 - **`overwatch-web`**: two pods spread across nodes, with a
   PodDisruptionBudget (`minAvailable: 1`). They hold no state: each keeps
   one stream open to the scanner and passes each change straight on to its
@@ -113,6 +141,7 @@ One image (`whitepatrick/overwatch`), three roles, in the `overwatch` namespace:
 ```
 browser ◀─SSE── Caddy (brick9000) ◀── Traefik ◀── overwatch-web ×2 ◀─SSE── overwatch-scanner ◀─D-Bus── bluetoothd (brick666)
                                                             ◀─SSE── overwatch-wifi ◀─AF_PACKET── wlmon0 (brick666)
+                                                            ◀─SSE── overwatch-upnp ◀─SSDP/SOAP── the router
 ```
 
 | Endpoint | Scanner | Web |
@@ -123,12 +152,13 @@ browser ◀─SSE── Caddy (brick9000) ◀── Traefik ◀── overwatch-
 | `/health` | process up | process up |
 | `/ready` | BlueZ scanning | has heard from the scanner |
 
-The Wi-Fi watch serves the same endpoints as the scanner.
+The Wi-Fi and UPnP watches serve the same endpoints as the scanner.
 
 Settings (environment): `OVERWATCH_PORT` (8080), `OVERWATCH_LEARN_SECONDS` (600,
 scanner), `OVERWATCH_WIFI_IFACE` (`wlmon0`), `OVERWATCH_WIFI_HOME` (the house
 networks' JSON), `OVERWATCH_WIFI_HOME_SHARE` (0.6), `OVERWATCH_SCANNER_URL` and
-`OVERWATCH_WIFI_URL` (web).
+`OVERWATCH_WIFI_URL` (web), `OVERWATCH_UPNP_ROUTER` (192.168.1.1),
+`OVERWATCH_UPNP_ALLOW`, `OVERWATCH_UPNP_INTERVAL` (60) and `OVERWATCH_UPNP_URL` (web).
 
 ### The house's networks
 
@@ -185,6 +215,8 @@ address or a BSSID:
   alerts and scan failures.
 - Wi-Fi watch: `overwatch_wifi_*`: capturing, channel, access points heard,
   threats now, management frames by subtype, alerts and capture failures.
+- UPnP watch: `overwatch_upnp_*`: router answering, forwards now,
+  unexpected forwards now, forwards opened, alerts and polls by result.
 - web pods: `overwatch_web_upstream_up` and `_reconnects_total` per feed.
 - all three: `overwatch_stream_clients`, `overwatch_state_changes_total`,
   `overwatch_http_requests_total`.
@@ -199,7 +231,7 @@ poetry run python -m overwatch web   # OVERWATCH_SCANNER_URL=http://<scanner>
 
 ## Release
 
-1. Bump `version` in `pyproject.toml` and the image tag in both
+1. Bump `version` in `pyproject.toml` and the image tag in the three
    Deployments and the DaemonSet.
 2. Build and push with brick-cicd-config's `build-image` Jenkins job:
    `IMAGE=whitepatrick/overwatch`, `REF=<full commit>`, `TAG=<version>`. It

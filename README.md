@@ -85,7 +85,8 @@ header shows how long ago the last change was. Trackers advertise every
 
 One image (`whitepatrick/overwatch`), three roles, in the `overwatch` namespace:
 
-- **`overwatch-scanner`**: one pod, pinned to brick1982. A radio is a place,
+- **`overwatch-scanner`**: one pod, pinned to brick666 (with
+  `wlmon0`, so both radios share a node). A radio is a place,
   not a replica, so there's exactly one, and a rollout stops the old pod
   first (`Recreate`). It talks to the host's bluetoothd through the D-Bus
   system socket (a `hostPath` mount), so it runs as `nobody` (the bus refuses
@@ -110,7 +111,7 @@ One image (`whitepatrick/overwatch`), three roles, in the `overwatch` namespace:
   signal". When a web pod goes, browsers reconnect to the other on their own.
 
 ```
-browser ◀─SSE── Caddy (brick9000) ◀── Traefik ◀── overwatch-web ×2 ◀─SSE── overwatch-scanner ◀─D-Bus── bluetoothd (brick1982)
+browser ◀─SSE── Caddy (brick9000) ◀── Traefik ◀── overwatch-web ×2 ◀─SSE── overwatch-scanner ◀─D-Bus── bluetoothd (brick666)
                                                             ◀─SSE── overwatch-wifi ◀─AF_PACKET── wlmon0 (brick666)
 ```
 
@@ -205,5 +206,5 @@ poetry run python -m overwatch web   # OVERWATCH_SCANNER_URL=http://<scanner>
    builds reproducibly and labels the image with the commit, which the
    nightly `verify-images` job rebuilds and checks.
 3. `kubectl diff -f k8s_config/`, then `kubectl apply -f k8s_config/`.
-4. Check: `kubectl -n overwatch get pods -o wide` (one scanner on brick1982,
+4. Check: `kubectl -n overwatch get pods -o wide` (one scanner on brick666,
    two web pods on different nodes, all ready) and the page.

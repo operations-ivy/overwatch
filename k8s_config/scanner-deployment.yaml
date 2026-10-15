@@ -1,5 +1,5 @@
-# The scanner: one pod, on the node whose radio should listen (brick1982, by
-# the kiosk). It's a place, not a replica, so there's exactly one and a
+# The scanner: one pod, on the node whose radio should listen (brick666, next
+# to the Wi-Fi watch's wlmon0). It's a place, not a replica, so there's exactly one and a
 # rollout stops the old pod before starting the new one. It reaches the host's
 # bluetoothd through the D-Bus system socket and needs no privileges.
 apiVersion: apps/v1
@@ -20,7 +20,7 @@ spec:
         app: overwatch-scanner
     spec:
       nodeSelector:
-        kubernetes.io/hostname: brick1982
+        kubernetes.io/hostname: brick666
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
@@ -52,7 +52,6 @@ spec:
           requests:
             cpu: 20m
             memory: 48Mi
-          # brick1982 is a Pi 4: no tight CPU limit (docs: slow starters).
           limits:
             cpu: 500m
             memory: 128Mi

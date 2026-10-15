@@ -34,7 +34,7 @@ data:
       "panels": [
         {
           "type": "row",
-          "title": "Bluetooth (the scanner on brick1982)",
+          "title": "Bluetooth (the scanner on brick666)",
           "collapsed": false,
           "panels": [],
           "gridPos": {
@@ -1699,7 +1699,6 @@ data:
       "schemaVersion": 41,
       "tags": [
         "overwatch",
-        "brick1982",
         "brick666"
       ],
       "templating": {

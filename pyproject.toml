@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "overwatch"
-version = "0.5.2"
+version = "0.6.0"
 description = "Watch Bluetooth LE around the house for trackers and surveillance gadgets"
 authors = ["Patrick White <whitep@alumni.vcu.edu>"]
 packages = [{ include = "overwatch" }]
@@ -8,6 +8,7 @@ packages = [{ include = "overwatch" }]
 [tool.poetry.dependencies]
 python = "^3.11"
 bleak = "^1.1.0"
+prometheus-client = "^0.22.0"
 
 [tool.poetry.group.dev.dependencies]
 pre-commit = "^4.2.0"

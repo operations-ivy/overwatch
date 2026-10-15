@@ -25,6 +25,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from . import metrics
 from .hub import Hub, events, stream
 
 log = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ class Upstream:
         self.scanner: dict | None = None
         self.error = ""
         self.ready = False
+        self.drops = 0  # times the stream ended or failed
         self.on_change = on_change or (lambda: hub.publish(self.state()))
         self.on_change()
 
@@ -63,6 +65,7 @@ class Upstream:
             if not self.error:
                 log.warning("%s unreachable: %s", self.name, e)
         self.error = f"{self.name} unreachable"
+        self.drops += 1
         self.on_change()
 
     def run(self) -> None:
@@ -100,12 +103,16 @@ class Relay:
         self.ble.run()
 
 
-def make_server(upstream: Upstream, hub: Hub, host: str, port: int, heartbeat: float = 5) -> ThreadingHTTPServer:
+def make_server(upstream, hub: Hub, host: str, port: int, heartbeat: float = 5) -> ThreadingHTTPServer:
+    requests = metrics.Requests()
+    reg = metrics.web_registry(upstream, hub, requests) if isinstance(upstream, Relay) else None
+
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             if self.path in ("/", "/index.html"):
                 self._send(200, PAGE, "text/html; charset=utf-8")
             elif self.path == "/api/stream":
+                requests.add(self.path, 200)
                 self._stream()
             elif self.path == "/api/state":
                 body = {"now": time.time(), **json.loads(hub.latest())}
@@ -114,6 +121,8 @@ def make_server(upstream: Upstream, hub: Hub, host: str, port: int, heartbeat: f
                 self._send(200, b"ok\n")
             elif self.path == "/ready":
                 self._send(*((200, b"ready\n") if upstream.ready else (503, b"no scanner data yet\n")))
+            elif self.path == "/metrics" and reg is not None:
+                self._send(200, metrics.render(reg), metrics.CONTENT_TYPE_LATEST)
             else:
                 self._send(404, b"not found\n")
 
@@ -135,6 +144,7 @@ def make_server(upstream: Upstream, hub: Hub, host: str, port: int, heartbeat: f
                 pass  # the browser went away
 
         def _send(self, code: int, body: bytes, ctype: str = "text/plain; charset=utf-8"):
+            requests.add(self.path, code)
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))

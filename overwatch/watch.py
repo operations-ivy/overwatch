@@ -23,6 +23,7 @@ import logging
 import os
 import threading
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 
 log = logging.getLogger(__name__)
@@ -219,6 +220,10 @@ class Watch:
         self._numbered = 0
         self.error = ""
         self.scanning = False  # set by the scanner once BlueZ is listening
+        # Running totals for /metrics (metrics.py).
+        self.advert_counts: Counter = Counter()
+        self.alert_counts: Counter = Counter()
+        self.failures = 0
         self._lock = threading.Lock()
 
     def _key(self, address: str) -> str:
@@ -235,6 +240,7 @@ class Watch:
     ) -> None:
         now = time.time() if now is None else now
         with self._lock:
+            self.advert_counts[kind] += 1
             key = self._key(address)
             s = self.devices.get(key)
             if s is None or now - s.last > self.gone_seconds:
@@ -278,6 +284,7 @@ class Watch:
                     a["kind"] == kind and a["at"] >= since for a in self.alerts
                 ):
                     newest = max(devs, key=lambda d: d[1].first)[1]
+                    self.alert_counts[kind] += 1
                     self.alerts.append(
                         {
                             "kind": kind,

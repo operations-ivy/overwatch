@@ -19,6 +19,7 @@ class Hub:
         self._version = 0
         self._data = b""
         self._key = b""
+        self.clients = 0  # listeners streaming now
 
     def publish(self, state: dict) -> bool:
         """Hand `state` to every listener, stamped with `changed` (when it
@@ -32,6 +33,10 @@ class Hub:
             self._version += 1
             self._cond.notify_all()
             return True
+
+    @property
+    def version(self) -> int:
+        return self._version
 
     def latest(self) -> bytes:
         with self._cond:
@@ -49,9 +54,15 @@ def stream(hub: Hub, write, heartbeat: float = 5) -> None:
     away: the current state at once, then each change, and a comment line
     every `heartbeat` seconds so proxies and the client know it's alive."""
     seen = 0
-    while True:
-        seen, data = hub.wait(seen, heartbeat)
-        write(b"data: " + data + b"\n\n" if data else b": ping\n\n")
+    with hub._cond:
+        hub.clients += 1
+    try:
+        while True:
+            seen, data = hub.wait(seen, heartbeat)
+            write(b"data: " + data + b"\n\n" if data else b": ping\n\n")
+    finally:
+        with hub._cond:
+            hub.clients -= 1
 
 
 def events(lines: Iterator[bytes]) -> Iterator[bytes | None]:

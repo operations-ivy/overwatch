@@ -72,7 +72,7 @@ class WebMetricsTests(unittest.TestCase):
         scanner_url, stop1 = serve(make_server(watch, scanner_hub, "127.0.0.1", 0, heartbeat=0.2))
         self.addCleanup(stop1)
         hub = Hub()
-        relay = web.Relay(scanner_url, "", hub, timeout=1, retry=0.05)
+        relay = web.Relay([("scanner", scanner_url)], hub, timeout=1, retry=0.05)
         base, stop2 = serve(web.make_server(relay, hub, "127.0.0.1", 0, heartbeat=0.2))
         self.addCleanup(stop2)
         threading.Thread(target=relay.run, daemon=True).start()

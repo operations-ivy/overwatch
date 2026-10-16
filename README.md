@@ -84,20 +84,44 @@ last 30 s count towards an alert, so a passer-by doesn't.
 
 ## The page
 
-Laid out like wigle-console and the chuck reader (same palette and fonts):
+Laid out like wigle-console and the chuck reader (same palette and fonts),
+one design for every feed:
 
-- the state in one word and a sentence: all clear, learning, heads up,
-  alert, scanner down or no signal;
-- tiles for trackers and gadgets nearby, alerts in the last 30 minutes, and
-  whether it's still learning;
-- each kind nearby, with its maker's icon: how many, how many is usual, how
+- a status strip: each feed's state (scanning, the Wi-Fi channel, the
+  router's forwards, or why one is down), the page's link to the pods, and
+  how long ago the last change was;
+- the state in one word and a sentence, the most severe across every feed:
+  alert (any feed's, in the last 5 minutes), heads up, learning, all clear,
+  scanner down or no signal;
+- tiles: alerts in the last 30 minutes, then every feed's own (trackers,
+  gadgets, mode; Wi-Fi attacks, access points; port forwards);
+- a panel per feed, all the same shape. Bluetooth lists each kind nearby, with its maker's icon: how many, how many is usual, how
   close the nearest one is, and a verdict (usual, above usual, unsure,
   learning). A row opens to a card per device: signal now and its range,
   how long it's been here, when it was last heard, adverts and their rate,
   address type (a random address rotates), and what the advert itself says
   (name, TX power, maker data, services, a Find My tag's battery, whether a
   Google tag is away from its owner). Open rows stay open across updates.
-- the last half hour's alerts. A new one flashes the header for a minute.
+  Wi-Fi lists the attacks heard in the last 2 minutes, UPnP every forward on
+  the router (unexpected ones first).
+- the last half hour's alerts from every feed, labelled with the feed. A new
+  one flashes the header for a minute.
+
+### Feeds: adding a scanner
+
+Every watch's state carries a `panel` in one shape (`overwatch/panel.py`:
+title, icon, status, a headline with a severity, stats, columns, rows that
+can open into cards, an empty line, alerts), and the page renders any panel
+the same way. Times travel as timestamps (`{"ago": ts}`, `{"for": ts}`), so
+they keep moving between pushes. The web pods follow `OVERWATCH_FEEDS`
+(`name=url,...`, in page order; the first is required). A new scanner is:
+
+1. its watch, with a `panel(st)` that builds that shape (and its metrics);
+2. a `python -m overwatch <mode>` entry, a Deployment and a Service;
+3. one more `name=url` in the web Deployment's `OVERWATCH_FEEDS`.
+
+No relay or page changes. `tests/test_web.py` holds that: a made-up feed
+passes straight through to the page.
 
 It's live: nothing polls. Each advert that changes what the page shows is
 pushed from the scanner to the web pods to every open browser as it happens

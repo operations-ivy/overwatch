@@ -29,7 +29,7 @@ spec:
           type: RuntimeDefault
       containers:
       - name: wifi
-        image: whitepatrick/overwatch:0.7.0
+        image: whitepatrick/overwatch:0.8.0
         imagePullPolicy: IfNotPresent
         args: ["wifi"]
         ports:

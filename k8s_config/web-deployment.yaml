@@ -47,19 +47,20 @@ spec:
           type: RuntimeDefault
       containers:
       - name: web
-        image: whitepatrick/overwatch:0.7.0
+        image: whitepatrick/overwatch:0.8.0
         imagePullPolicy: IfNotPresent
         args: ["web"]
         ports:
         - name: http
           containerPort: 8080
         env:
-        - name: OVERWATCH_SCANNER_URL
-          value: "http://overwatch-scanner.overwatch.svc.cluster.local"
-        - name: OVERWATCH_WIFI_URL
-          value: "http://overwatch-wifi.overwatch.svc.cluster.local"
-        - name: OVERWATCH_UPNP_URL
-          value: "http://overwatch-upnp.overwatch.svc.cluster.local"
+        # Every feed, in page order; the first is required (ready on it alone).
+        # A new scanner is one more name=url here: its panel needs no page change.
+        - name: OVERWATCH_FEEDS
+          value: >-
+            scanner=http://overwatch-scanner.overwatch.svc.cluster.local,
+            wifi=http://overwatch-wifi.overwatch.svc.cluster.local,
+            upnp=http://overwatch-upnp.overwatch.svc.cluster.local
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true

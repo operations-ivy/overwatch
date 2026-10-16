@@ -302,6 +302,11 @@ class Watch:
                     del self.over_since[kind]
             self.alerts = [a for a in self.alerts if now - a["at"] < 1800]
 
+    def panel(self, st: dict) -> dict:
+        """This feed in the page's common shape (panel.py)."""
+        from . import panel
+        return panel.bluetooth(st)
+
     def get(self, now: float | None = None) -> dict:
         now = time.time() if now is None else now
         with self._lock:

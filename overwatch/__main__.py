@@ -10,8 +10,10 @@ Settings come from the environment: OVERWATCH_PORT (8080), OVERWATCH_LEARN_SECON
 (600, scanner), OVERWATCH_WIFI_IFACE (wlmon0), OVERWATCH_WIFI_HOME (the house
 networks' JSON), OVERWATCH_WIFI_HOME_SHARE (0.6, time on their channels),
 OVERWATCH_UPNP_ROUTER (192.168.1.1), OVERWATCH_UPNP_ALLOW (allowed forwards),
-OVERWATCH_UPNP_INTERVAL (60), OVERWATCH_SCANNER_URL, OVERWATCH_WIFI_URL and
-OVERWATCH_UPNP_URL (web; no Wi-Fi or UPnP panel without them).
+OVERWATCH_UPNP_INTERVAL (60), and for the web pods OVERWATCH_FEEDS
+(`scanner=http://...,wifi=http://...,upnp=http://...`: every feed, in page
+order, the first required; or the older OVERWATCH_SCANNER_URL, _WIFI_URL
+and _UPNP_URL).
 """
 
 from __future__ import annotations
@@ -21,6 +23,18 @@ import os
 import sys
 
 from . import scanner, upnp, web, wifi
+
+
+def web_feeds(env) -> list[tuple[str, str]]:
+    """OVERWATCH_FEEDS (name=url,...; the first is required), or the older
+    OVERWATCH_SCANNER_URL / _WIFI_URL / _UPNP_URL."""
+    if env.get("OVERWATCH_FEEDS", "").strip():
+        return web.parse_feeds(env["OVERWATCH_FEEDS"])
+    feeds = [("scanner", env.get("OVERWATCH_SCANNER_URL", "http://overwatch-scanner"))]
+    for name, var in (("wifi", "OVERWATCH_WIFI_URL"), ("upnp", "OVERWATCH_UPNP_URL")):
+        if env.get(var):
+            feeds.append((name, env[var]))
+    return feeds
 
 
 def main() -> None:
@@ -48,13 +62,7 @@ def main() -> None:
             float(os.environ.get("OVERWATCH_UPNP_INTERVAL", "60")),
         )
     elif mode == "web":
-        web.main(
-            "0.0.0.0",
-            port,
-            os.environ.get("OVERWATCH_SCANNER_URL", "http://overwatch-scanner"),
-            os.environ.get("OVERWATCH_WIFI_URL", ""),
-            os.environ.get("OVERWATCH_UPNP_URL", ""),
-        )
+        web.main("0.0.0.0", port, web_feeds(os.environ))
     else:
         sys.exit(__doc__)
 

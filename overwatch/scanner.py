@@ -36,8 +36,13 @@ def address_type(device) -> str:
         return ""
 
 
-def state(watch: Watch) -> dict:
-    return {"scanning": watch.scanning, **watch.get()}
+def state(watch) -> dict:
+    """What a watch publishes: its own fields, plus `panel`, the same feed in
+    the common shape the page renders (panel.py)."""
+    st = {"scanning": watch.scanning, **watch.get()}
+    if hasattr(watch, "panel"):
+        st["panel"] = watch.panel(st)
+    return st
 
 
 def scan_forever(watch: Watch, hub: Hub, retry_seconds: float = 30) -> None:

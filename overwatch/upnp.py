@@ -278,6 +278,11 @@ class UpnpWatch:
     def unexpected(self) -> list[Mapping]:
         return [m for m in self.mappings.values() if not allowed(m, self.allow)]
 
+    def panel(self, st: dict) -> dict:
+        """This feed in the page's common shape (panel.py)."""
+        from . import panel
+        return panel.upnp(st)
+
     def get(self, now: float | None = None) -> dict:
         now = time.time() if now is None else now
         with self._lock:

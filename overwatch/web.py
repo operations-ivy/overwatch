@@ -1,15 +1,17 @@
 """The web pods: the page at overwatch.brick.nozdormu.cloud and its stream.
 
 They hold no radio and no state of their own: each one keeps a Server-Sent
-Events connection to the scanner, and one to the Wi-Fi watch if there is one,
-and passes every change on to its browsers the moment it arrives, so any
-replica gives the same page.
+Events connection to every feed (OVERWATCH_FEEDS: the Bluetooth scanner, the
+Wi-Fi and UPnP watches, whatever else is added) and passes every change on
+to its browsers the moment it arrives, so any replica gives the same page.
+Every feed's state carries a `panel` in one shape (panel.py) that the page
+renders, so a new feed needs no change here or in the page.
 Ready once the first state has arrived, so a rollout keeps the old pods
 serving until a new one has something to show. After that a pod stays ready
 if the scanner goes away, and the page says so.
 
     GET /            the page
-    GET /api/stream  Server-Sent Events: {error, scanner, wifi_error, wifi, upnp_error, upnp} now, then each change
+    GET /api/stream  Server-Sent Events: {feeds: [{name, error, state}, ...]} now, then each change
     GET /api/state   the same, once, plus `now`
     GET /health      the process is up
     GET /ready       has heard from the scanner at least once
@@ -74,39 +76,54 @@ class Upstream:
             time.sleep(self.retry)
 
 
-class Relay:
-    """Every feed as one state. Ready on the Bluetooth scanner alone: the
-    Wi-Fi watch runs wherever the dongle is plugged in, which may be nowhere,
-    and the UPnP watch is optional too."""
+def parse_feeds(spec: str) -> list[tuple[str, str]]:
+    """OVERWATCH_FEEDS: `name=url,name=url`, in page order. The first is
+    required: the pods are ready once it has been heard."""
+    feeds = []
+    for part in (p.strip() for p in spec.split(",")):
+        if not part:
+            continue
+        name, sep, url = part.partition("=")
+        if not sep or not name.strip() or not url.strip():
+            raise ValueError(f"OVERWATCH_FEEDS entry {part!r} isn't name=url")
+        feeds.append((name.strip(), url.strip()))
+    if not feeds:
+        raise ValueError("OVERWATCH_FEEDS names no feeds")
+    if len({n for n, _ in feeds}) != len(feeds):
+        raise ValueError("OVERWATCH_FEEDS names a feed twice")
+    return feeds
 
-    def __init__(self, scanner_url: str, wifi_url: str, hub: Hub, upnp_url: str = "", **kw):
-        self.hub, self.ble, self.wifi, self.upnp = hub, None, None, None
-        self.ble = Upstream(scanner_url, hub, on_change=self.publish, **kw)
-        if wifi_url:
-            self.wifi = Upstream(wifi_url, hub, on_change=self.publish, name="Wi-Fi watch", **kw)
-        if upnp_url:
-            self.upnp = Upstream(upnp_url, hub, on_change=self.publish, name="UPnP watch", **kw)
+
+class Relay:
+    """Every feed as one state, in order. Ready on the first (required) feed
+    alone: the others may run nowhere (the Wi-Fi watch follows its dongle)."""
+
+    def __init__(self, feeds: list[tuple[str, str]], hub: Hub, **kw):
+        self.hub, self.feeds = hub, None  # nothing published until every feed exists
+        built = [Upstream(url, hub, on_change=self.publish, name=name, **kw) for name, url in feeds]
+        self.feeds = built
         self.publish()
 
     @property
+    def required(self) -> Upstream:
+        return self.feeds[0]
+
+    @property
     def ready(self) -> bool:
-        return self.ble.ready
+        return self.required.ready
+
+    def feed(self, name: str) -> Upstream | None:
+        return next((f for f in self.feeds if f.name == name), None)
 
     def publish(self) -> None:
-        if self.ble is None:
+        if not self.feeds:
             return  # still starting
-        state = self.ble.state()
-        if self.wifi:
-            state.update(wifi_error=self.wifi.error, wifi=self.wifi.scanner)
-        if self.upnp:
-            state.update(upnp_error=self.upnp.error, upnp=self.upnp.scanner)
-        self.hub.publish(state)
+        self.hub.publish({"feeds": [{"name": f.name, "error": f.error, "state": f.scanner} for f in self.feeds]})
 
     def run(self) -> None:
-        for feed in (self.wifi, self.upnp):
-            if feed:
-                threading.Thread(target=feed.run, daemon=True).start()
-        self.ble.run()
+        for feed in self.feeds[1:]:
+            threading.Thread(target=feed.run, daemon=True).start()
+        self.required.run()
 
 
 def make_server(upstream, hub: Hub, host: str, port: int, heartbeat: float = 5) -> ThreadingHTTPServer:
@@ -164,10 +181,9 @@ def make_server(upstream, hub: Hub, host: str, port: int, heartbeat: float = 5) 
     return ThreadingHTTPServer((host, port), Handler)
 
 
-def main(host: str, port: int, scanner_url: str, wifi_url: str = "", upnp_url: str = "") -> None:
+def main(host: str, port: int, feeds: list[tuple[str, str]]) -> None:
     hub = Hub()
-    relay = Relay(scanner_url, wifi_url, hub, upnp_url)
+    relay = Relay(feeds, hub)
     threading.Thread(target=relay.run, daemon=True).start()
-    feeds = [u.url for u in (relay.ble, relay.wifi, relay.upnp) if u]
-    log.info("web on %s:%d, following %s", host, port, ", ".join(feeds))
+    log.info("web on %s:%d, following %s", host, port, ", ".join(f"{f.name} ({f.url})" for f in relay.feeds))
     make_server(relay, hub, host, port).serve_forever()

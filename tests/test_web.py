@@ -120,32 +120,82 @@ class RelayTests(unittest.TestCase):
         from tests.test_wifi import OTHER_AP, beacon
 
         hub = Hub()
-        relay = web.Relay(self.scanner_url, self.wifi_url, hub, timeout=1, retry=0.05)
+        relay = web.Relay([("scanner", self.scanner_url), ("wifi", self.wifi_url)], hub, timeout=1, retry=0.05)
         base, stop = serve(web.make_server(relay, hub, "127.0.0.1", 0, heartbeat=0.2))
         self.addCleanup(stop)
         threading.Thread(target=relay.run, daemon=True).start()
         deadline = time.time() + 3
-        while time.time() < deadline and not (relay.ready and relay.wifi.ready):
+        while time.time() < deadline and not (relay.ready and relay.feed("wifi").ready):
             time.sleep(0.01)
         _, st = get_json(base + "/api/state")
-        self.assertEqual((st["wifi_error"], st["wifi"]["threats"]), ("", []))
+        self.assertEqual([f["name"] for f in st["feeds"]], ["scanner", "wifi"])
+        wifi = st["feeds"][1]
+        self.assertEqual((wifi["error"], wifi["state"]["threats"], wifi["state"]["panel"]["rows"]), ("", [], []))
         self.wifi.home = [Network("home", "Castle", set(), "WPA2", set())]
         self.wifi.heard(parse(beacon(OTHER_AP, "Castle")), -40, 6)
         self.wifi_hub.publish(state(self.wifi))
         deadline = time.time() + 3
         while time.time() < deadline:
             _, st = get_json(base + "/api/state")
-            if st["wifi"]["threats"]:
+            if st["feeds"][1]["state"]["threats"]:
                 break
             time.sleep(0.01)
-        self.assertEqual(st["wifi"]["threats"][0]["kind"], "twin")
+        panel = st["feeds"][1]["state"]["panel"]
+        self.assertEqual(st["feeds"][1]["state"]["threats"][0]["kind"], "twin")
+        self.assertEqual((panel["headline"]["severity"], panel["rows"][0]["verdict"]["tone"]), (3, "bad"))
 
     def test_ready_without_a_wifi_watch(self):
         hub = Hub()
-        relay = web.Relay(self.scanner_url, "http://127.0.0.1:9", hub, timeout=1, retry=0.05)
+        relay = web.Relay([("scanner", self.scanner_url), ("wifi", "http://127.0.0.1:9")], hub, timeout=1, retry=0.05)
         threading.Thread(target=relay.run, daemon=True).start()
         deadline = time.time() + 3
-        while time.time() < deadline and not (relay.ready and relay.wifi.error):
+        while time.time() < deadline and not (relay.ready and relay.feed("wifi").error):
             time.sleep(0.01)
         self.assertTrue(relay.ready)
-        self.assertEqual(json.loads(hub.latest())["wifi_error"], "Wi-Fi watch unreachable")
+        self.assertEqual(json.loads(hub.latest())["feeds"][1]["error"], "wifi unreachable")
+
+    def test_a_new_feed_drops_in(self):
+        """A feed the relay has never heard of, with any name, passes straight
+        through: its panel is all the page needs (#12)."""
+        from overwatch.hub import Hub as H
+
+        class Radar:  # a made-up fourth watch, in the common shape
+            scanning, error = True, ""
+
+            def get(self):
+                return {"error": "", "alerts": []}
+
+            def panel(self, st):
+                return {"id": "radar", "title": "Radar", "icon": "radar", "status": {"state": "ok", "text": "sweeping"},
+                        "headline": {"severity": 0, "word": "ALL CLEAR", "tone": "ok", "line": ""},
+                        "stats": [], "meta": "", "columns": [{"label": "What"}],
+                        "rows": [{"key": "a", "name": "Blip", "cells": []}], "empty": "", "alerts": []}
+
+        radar_hub = H()
+        radar_url, stop3 = serve(scanner_server(Radar(), radar_hub, "127.0.0.1", 0, heartbeat=0.2))
+        self.addCleanup(stop3)
+        radar_hub.publish(state(Radar()))
+        hub = Hub()
+        relay = web.Relay([("scanner", self.scanner_url), ("radar", radar_url)], hub, timeout=1, retry=0.05)
+        threading.Thread(target=relay.run, daemon=True).start()
+        deadline = time.time() + 3
+        while time.time() < deadline and not (relay.ready and relay.feed("radar").ready):
+            time.sleep(0.01)
+        radar = json.loads(hub.latest())["feeds"][1]
+        self.assertEqual((radar["name"], radar["state"]["panel"]["rows"][0]["name"]), ("radar", "Blip"))
+
+
+class FeedListTests(unittest.TestCase):
+    def test_parse_feeds(self):
+        self.assertEqual(web.parse_feeds(" scanner=http://a , wifi=http://b,"), [("scanner", "http://a"), ("wifi", "http://b")])
+        for bad in ("", "scanner", "=http://a", "a=http://x,a=http://y"):
+            with self.assertRaises(ValueError):
+                web.parse_feeds(bad)
+
+    def test_the_older_variables_still_work(self):
+        from overwatch.__main__ import web_feeds
+
+        self.assertEqual(web_feeds({"OVERWATCH_SCANNER_URL": "http://s", "OVERWATCH_UPNP_URL": "http://u"}),
+                         [("scanner", "http://s"), ("upnp", "http://u")])
+        self.assertEqual(web_feeds({"OVERWATCH_FEEDS": "scanner=http://s", "OVERWATCH_WIFI_URL": "http://w"}),
+                         [("scanner", "http://s")])

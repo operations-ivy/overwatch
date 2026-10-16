@@ -379,6 +379,11 @@ class WifiWatch:
                 continue
             self._threat("twin", f.bssid, now, confidence, home.name, reason, rssi=rssi, channel=on)
 
+    def panel(self, st: dict) -> dict:
+        """This feed in the page's common shape (panel.py)."""
+        from . import panel
+        return panel.wifi(st)
+
     def get(self, now: float | None = None) -> dict:
         now = time.time() if now is None else now
         with self._lock:

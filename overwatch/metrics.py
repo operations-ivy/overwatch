@@ -153,11 +153,9 @@ class _Web:
         reconnects = CounterMetricFamily(
             "overwatch_web_upstream_reconnects", "Times the feed's stream ended.", labels=["upstream"]
         )
-        for name, u in (("scanner", self.relay.ble), ("wifi", self.relay.wifi), ("upnp", self.relay.upnp)):
-            if u is None:
-                continue
-            up.add_metric([name], int(u.ready and not u.error))
-            reconnects.add_metric([name], u.drops)
+        for u in self.relay.feeds:
+            up.add_metric([u.name], int(u.ready and not u.error))
+            reconnects.add_metric([u.name], u.drops)
         yield up
         yield reconnects
 

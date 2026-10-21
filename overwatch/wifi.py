@@ -242,11 +242,20 @@ class WifiWatch:
         karma_ssids: int = 4,
         karma_seconds: float = 60,
         gone_seconds: float = 120,
+        overlap_seconds: float = 60,
     ):
         self.home = home or []
         self.deauth_frames, self.deauth_seconds = deauth_frames, deauth_seconds
         self.karma_ssids, self.karma_seconds = karma_ssids, karma_seconds
         self.gone_seconds = gone_seconds
+        # A house BSSID on a channel outside the list is a twin only while
+        # the real one is still heard on a house channel: heard there after
+        # the other channel's first beacon, within this long. A router that
+        # moved (a restart, DFS) went quiet on the old channel first.
+        self.overlap_seconds = overlap_seconds
+        self._home_last: dict[str, float] = {}  # BSSID -> last heard on a house channel
+        self._off: dict[tuple[str, int], list[float]] = {}  # (BSSID, channel) -> [first, last]
+        self.moved: dict[str, tuple[str, int, float]] = {}  # hashed BSSID -> (network, channel, last)
         self.salt = os.urandom(16)
         self.threats: dict[tuple[str, str], Threat] = {}
         self.alerts: list[dict] = []  # newest last, kept 30 minutes
@@ -373,8 +382,23 @@ class WifiWatch:
                 )
             elif RANK.get(f.security or "", 0) < RANK.get(home.security, 3):
                 reason, confidence = f"{home.name}'s own BSSID offering {f.security}, not {home.security}", "high"
-            elif home.channels and on and on not in home.channels:
-                reason, confidence = f"{home.name}'s own BSSID on channel {on}, which it doesn't use", "medium"
+            elif home.channels and on and on in home.channels:
+                self._home_last[f.bssid] = now
+                self.moved.pop(self._key(f.bssid), None)
+                continue
+            elif home.channels and on:
+                seen = self._off.get((f.bssid, on))
+                if seen is None or now - seen[1] > self.gone_seconds:
+                    seen = self._off[(f.bssid, on)] = [now, now]
+                seen[1] = now
+                last_home = self._home_last.get(f.bssid)
+                if last_home is None or last_home < seen[0] or now - last_home > self.overlap_seconds:
+                    # Moved, not doubled: news for the page, not an alert.
+                    self.moved[self._key(f.bssid)] = (home.name, on, now)
+                    continue
+                channels = ", ".join(str(c) for c in sorted(home.channels))
+                reason, confidence = (f"{home.name}'s own BSSID on channel {on} while still on its own ({channels})",
+                                      "medium")
             else:
                 continue
             self._threat("twin", f.bssid, now, confidence, home.name, reason, rssi=rssi, channel=on)
@@ -391,12 +415,17 @@ class WifiWatch:
                 del self.threats[k]
             for k in [k for k, t in self.aps.items() if now - t > self.gone_seconds]:
                 del self.aps[k]
+            for k in [k for k, m in self.moved.items() if now - m[2] > self.gone_seconds]:
+                del self.moved[k]
             self.alerts = [a for a in self.alerts if now - a["at"] < 1800]
             return {
                 "error": self.error,
                 "channel": self.channel,
                 "home": [n.name for n in self.home],
                 "aps": len(self.aps),
+                # A house network heard only on a channel outside its list:
+                # update overwatch-wifi-home's channels.
+                "moved": sorted({(name, ch) for name, ch, _ in self.moved.values()}),
                 "threats": [
                     {
                         "kind": t.kind,

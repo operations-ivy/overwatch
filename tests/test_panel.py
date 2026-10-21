@@ -49,6 +49,12 @@ class WifiPanelTests(unittest.TestCase):
         gone = panel.wifi({"scanning": False, "error": "no dongle", "threats": []})
         self.assertEqual((gone["status"]["state"], gone["empty"]), ("error", "no dongle."))
 
+    def test_a_house_network_that_moved_is_news(self):
+        p = panel.wifi({"scanning": True, "error": "", "channel": 1, "home": ["home"], "aps": 3, "threats": [],
+                        "moved": [("home", 116)]})
+        self.assertEqual((p["headline"]["severity"], p["headline"]["word"]), (0, "ALL CLEAR"))
+        self.assertEqual(p["headline"]["line"], "home is on channel 116, which isn't in its list: update its channels")
+
 
 class UpnpPanelTests(unittest.TestCase):
     def forward(self, allowed):

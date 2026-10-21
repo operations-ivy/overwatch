@@ -41,8 +41,13 @@ frames:
 | Deauth flood | 10 or more deauth/disassoc frames in 5 s for one BSSID | high on the house's networks, medium on a neighbour's |
 | Evil twin | a house SSID from a BSSID that isn't the house's | high |
 | Evil twin | a house BSSID offering weaker security (open, WPA2 instead of WPA3, …) | high |
-| Evil twin | a house BSSID on a channel the house doesn't use | medium |
+| Evil twin | a house BSSID on a channel the house doesn't use, while the real one is still heard on a house channel (heard there after the other's first beacon, within 60 s) | medium |
 | Karma / Pineapple | one non-house BSSID answering probes for 4 or more SSIDs in a minute | high |
+
+A house BSSID heard only on a channel outside its list has moved (the router
+restarted, or left a DFS channel for radar): not an alert, but the Wi-Fi
+panel's line says so until `overwatch-wifi-home`'s channels are updated (the
+router moved from 108 to 116 on 2026-10-17 and this rule fired for days).
 
 Each one alerts as soon as it's heard; it stays on the page until it's gone
 quiet for two minutes. The house's networks (name, SSID, BSSIDs, security,

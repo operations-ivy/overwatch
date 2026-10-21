@@ -147,7 +147,7 @@ def wifi(st: dict) -> dict:
         "status": status(error, st.get("scanning", False), f"ch {st.get('channel') or '…'}"),
         "headline": ({"severity": 3, "word": "HEADS UP", "tone": "bad",
                       "line": " · ".join(f"{t['label']} (AP {t['n']}): {t['reason']}" for t in threats)}
-                     if threats else {"severity": 0, "word": "ALL CLEAR", "tone": "ok", "line": ""}),
+                     if threats else {"severity": 0, "word": "ALL CLEAR", "tone": "ok", "line": moved_line(st)}),
         "stats": [
             {"label": "Wi-Fi attacks", "value": str(len(threats)), "sub": "going on now", "tone": "bad" if threats else "dim"},
             {"label": "Access points", "value": str(st.get("aps", 0)), "sub": "heard lately", "tone": "dim"},
@@ -158,6 +158,12 @@ def wifi(st: dict) -> dict:
         "empty": f"{error}." if error else "No attacks heard.",
         "alerts": st.get("alerts", []),
     }
+
+
+def moved_line(st: dict) -> str:
+    """News, not an alert: a house network now on a channel its list lacks."""
+    return " · ".join(f"{name} is on channel {ch}, which isn't in its list: update its channels"
+                      for name, ch in st.get("moved", []))
 
 
 def upnp(st: dict) -> dict:

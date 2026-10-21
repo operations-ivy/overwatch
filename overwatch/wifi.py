@@ -3,7 +3,12 @@ frames for attacks on the house's Wi-Fi.
 
 - Deauth floods: deauthentication or disassociation frames for one access
   point faster than any real network sends them, which is how attackers
-  knock clients off (to capture handshakes, or push them onto a twin).
+  knock clients off (to capture handshakes, or push them onto a twin). A
+  flood counts against the house when any of the frame's addresses is one of
+  its BSSIDs, a sibling of one (routers serve clients on BSSIDs they don't
+  beacon: the same first five octets and nearby last octet, or the same last
+  five with other bits set in the first), or matches a network's
+  `prefixes`. A strong flood on an unknown BSSID is "near the house".
 - Evil twins: one of the house's SSIDs beaconed by a BSSID that isn't one of
   its access points, or by one of its BSSIDs with weaker security or on a
   channel the house doesn't use.
@@ -182,11 +187,29 @@ class Network:
     bssids: set[str]
     security: str
     channels: set[int]
+    prefixes: tuple[str, ...] = ()  # BSSID prefixes that are the house too (sibling BSSIDs)
+
+
+def octets(address: str) -> bytes:
+    return bytes.fromhex(address.replace(":", ""))
+
+
+def siblings(a: str, b: str) -> bool:
+    """Two BSSIDs one router would hand out: the same first five octets and
+    the last in the same block of 16, or the same last five and the first
+    differing only in its locally-administered and top bits (virtual and mesh
+    BSSIDs set those). Never two different makers' unicast addresses."""
+    x, y = octets(a), octets(b)
+    if len(x) != 6 or len(y) != 6 or x == y:
+        return False
+    if x[:5] == y[:5] and x[5] >> 4 == y[5] >> 4:
+        return True
+    return x[1:] == y[1:] and (x[0] & 0x01) == (y[0] & 0x01)
 
 
 def load_home(path: str) -> list[Network]:
     """The house's networks: {"networks": [{"name", "ssid", "bssids",
-    "security", "channels"}]}."""
+    "security", "channels", "prefixes"}]} ("prefixes" optional)."""
     with open(path) as f:
         data = json.load(f)
     return [
@@ -196,6 +219,7 @@ def load_home(path: str) -> list[Network]:
             {b.lower() for b in n.get("bssids", [])},
             n.get("security", "WPA2"),
             {int(c) for c in n.get("channels", [])},
+            tuple(p.lower() for p in n.get("prefixes", [])),
         )
         for n in data["networks"]
     ]
@@ -224,7 +248,7 @@ class Threat:
     first: float
     last: float
     confidence: str
-    target: str  # the house network's name, or "a neighbour's network"
+    target: str  # the house network's name, "a network near the house" or "a neighbour's network"
     reason: str
     rssi: int | None = None
     channel: int = 0
@@ -243,11 +267,15 @@ class WifiWatch:
         karma_seconds: float = 60,
         gone_seconds: float = 120,
         overlap_seconds: float = 60,
+        near_dbm: int = -60,
     ):
         self.home = home or []
         self.deauth_frames, self.deauth_seconds = deauth_frames, deauth_seconds
         self.karma_ssids, self.karma_seconds = karma_ssids, karma_seconds
         self.gone_seconds = gone_seconds
+        # A flood on a BSSID that isn't the house's, heard louder than this,
+        # is close by: "near the house", not "a neighbour's".
+        self.near_dbm = near_dbm
         # A house BSSID on a channel outside the list is a twin only while
         # the real one is still heard on a house channel: heard there after
         # the other channel's first beacon, within this long. A router that
@@ -283,6 +311,21 @@ class WifiWatch:
 
     def _network(self, bssid: str) -> Network | None:
         return next((n for n in self.home if bssid in n.bssids), None)
+
+    def _attacked(self, f: Frame) -> tuple[Network | None, str]:
+        """The house network a deauth is aimed at, by any of its addresses,
+        and how: "" (one of its BSSIDs), "sibling" or "prefix"."""
+        addresses = [a for a in (f.bssid, f.transmitter, f.receiver) if a != BROADCAST]
+        tests = {
+            "": lambda a, n: a in n.bssids,
+            "sibling": lambda a, n: any(siblings(a, h) for h in n.bssids),
+            "prefix": lambda a, n: any(a.startswith(p) for p in n.prefixes),
+        }
+        for how, test in tests.items():  # the closest match first
+            for n in self.home:
+                if any(test(a, n) for a in addresses):
+                    return n, how
+        return None, ""
 
     def _threat(self, kind: str, bssid: str, now: float, confidence: str, target: str, reason: str, **extra) -> None:
         key = self._key(bssid)
@@ -333,17 +376,27 @@ class WifiWatch:
             q.popleft()
         if len(q) < self.deauth_frames:
             return
-        net = self._network(f.bssid)
+        net, how = self._attacked(f)
         broadcast = any(b for _, b in q)
         reason = f"{len(q)} deauth/disassoc frames in {self.deauth_seconds:g} s" + (
             ", to everyone" if broadcast else ""
         )
+        if how:
+            reason += f", on a {'sibling BSSID' if how == 'sibling' else 'BSSID in its prefixes'}"
+        if self._key(f.bssid) not in self.aps:
+            reason += ", BSSID not beaconing"
+        if net:
+            target = net.name
+        elif rssi is not None and rssi > self.near_dbm:
+            target = "a network near the house"
+        else:
+            target = "a neighbour's network"
         self._threat(
             "deauth",
             f.bssid,
             now,
             "high" if net else "medium",
-            net.name if net else "a neighbour's network",
+            target,
             reason,
             rssi=rssi,
             channel=channel,
@@ -397,8 +450,10 @@ class WifiWatch:
                     self.moved[self._key(f.bssid)] = (home.name, on, now)
                     continue
                 channels = ", ".join(str(c) for c in sorted(home.channels))
-                reason, confidence = (f"{home.name}'s own BSSID on channel {on} while still on its own ({channels})",
-                                      "medium")
+                reason, confidence = (
+                    f"{home.name}'s own BSSID on channel {on} while still on its own ({channels})",
+                    "medium",
+                )
             else:
                 continue
             self._threat("twin", f.bssid, now, confidence, home.name, reason, rssi=rssi, channel=on)
@@ -406,6 +461,7 @@ class WifiWatch:
     def panel(self, st: dict) -> dict:
         """This feed in the page's common shape (panel.py)."""
         from . import panel
+
         return panel.wifi(st)
 
     def get(self, now: float | None = None) -> dict:

@@ -38,7 +38,7 @@ frames:
 
 | Kind | How it's recognised | Confidence |
 | --- | --- | --- |
-| Deauth flood | 10 or more deauth/disassoc frames in 5 s for one BSSID | high on the house's networks, medium on a neighbour's |
+| Deauth flood | 10 or more deauth/disassoc frames in 5 s for one BSSID | high on the house's networks (any of the frame's addresses: a house BSSID, a sibling of one, or a listed prefix), medium otherwise ("near the house" above -60 dBm, else "a neighbour's") |
 | Evil twin | a house SSID from a BSSID that isn't the house's | high |
 | Evil twin | a house BSSID offering weaker security (open, WPA2 instead of WPA3, …) | high |
 | Evil twin | a house BSSID on a channel the house doesn't use, while the real one is still heard on a house channel (heard there after the other's first beacon, within 60 s) | medium |
@@ -195,11 +195,18 @@ networks' JSON), `OVERWATCH_WIFI_HOME_SHARE` (0.6), `OVERWATCH_SCANNER_URL` and
 `home.json`):
 
 ```json
-{"networks": [{"name": "home", "ssid": "…", "bssids": ["…"], "security": "WPA2", "channels": [6, 149]}]}
+{"networks": [{"name": "home", "ssid": "…", "bssids": ["…"], "security": "WPA2", "channels": [6, 149],
+               "prefixes": ["…"]}]}
 ```
 
 List every BSSID the house's access points use (each band and each mesh
-node has its own). For a draft from what the dongle hears, strongest first:
+node has its own). Routers also serve clients on BSSIDs they never beacon,
+which the survey can't see; a deauth flood on one of those still counts
+against the house when it's a sibling of a listed BSSID (the same first five
+octets and the last in the same block of 16, or the same last five octets
+with other bits set in the first). `prefixes` (optional) covers the rest: any
+BSSID starting with one is the house's for deauths (overwatch#5). A flood's
+reason says "BSSID not beaconing" when the attacked BSSID sends no beacons. For a draft from what the dongle hears, strongest first:
 `kubectl -n overwatch exec ds/overwatch-wifi -- python -m overwatch wifi-survey 60`.
 It prints SSIDs and BSSIDs, so it stays in the terminal: copy the house's
 networks into the secret and fill in each `name`.

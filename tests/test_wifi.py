@@ -16,6 +16,7 @@ from overwatch.wifi import (
     parse,
     radiotap,
     schedule,
+    siblings,
 )
 
 HOME_AP, OTHER_AP, CLIENT = "02:00:00:00:00:01", "02:00:00:00:00:99", "02:00:00:00:00:42"
@@ -120,9 +121,47 @@ class WatchTests(unittest.TestCase):
 
     def test_a_flood_on_a_neighbour_is_medium(self):
         for i in range(12):
-            self.hear(deauth(OTHER_AP), i * 0.2)
+            self.hear(deauth(OTHER_AP), i * 0.2, rssi=-75)
         self.assertEqual(self.kinds(3), [("deauth", "medium")])
-        self.assertEqual(self.w.get(now=3)["threats"][0]["target"], "a neighbour's network")
+        t = self.w.get(now=3)["threats"][0]
+        self.assertEqual(t["target"], "a neighbour's network")
+        self.assertIn("BSSID not beaconing", t["reason"])
+
+    def test_a_strong_flood_on_an_unknown_bssid_is_near_the_house(self):
+        # overwatch#5: live, -49 dBm, "a neighbour's network" was misleading.
+        for i in range(12):
+            self.hear(deauth(OTHER_AP), i * 0.2, rssi=-49)
+        self.assertEqual(self.kinds(3), [("deauth", "medium")])
+        self.assertEqual(self.w.get(now=3)["threats"][0]["target"], "a network near the house")
+
+    def test_a_flood_on_a_sibling_bssid_is_the_house(self):
+        # overwatch#5: the router served clients on a BSSID it didn't beacon.
+        for sibling in ("02:00:00:00:00:05", "06:00:00:00:00:01", "a2:00:00:00:00:01"):
+            w = WifiWatch(HOME, deauth_frames=10, deauth_seconds=5)
+            w.heard(parse(beacon(HOME_AP, "Castle")), -50, 6, now=0)
+            for i in range(12):
+                w.heard(parse(deauth(sibling)), -49, 6, now=1 + i * 0.2)
+            t = w.get(now=4)["threats"]
+            self.assertEqual(
+                [(x["kind"], x["confidence"], x["target"]) for x in t], [("deauth", "high", "home")], sibling
+            )
+            self.assertIn("on a sibling BSSID", t[0]["reason"])
+            self.assertIn("BSSID not beaconing", t[0]["reason"])
+
+    def test_a_flood_sent_from_the_house_bssid_counts_whatever_addr3_says(self):
+        frame = mgmt(DEAUTH, CLIENT, HOME_AP, OTHER_AP, b"\x07\x00")  # transmitter is the house
+        for i in range(12):
+            self.hear(frame, i * 0.2, rssi=-75)
+        self.assertEqual(self.w.get(now=3)["threats"][0]["target"], "home")
+
+    def test_prefixes_in_the_home_file(self):
+        prefixed = "0a:bb:cc:dd:ee:77"
+        w = WifiWatch([Network("home", "Castle", {HOME_AP}, "WPA2", {6}, ("0a:bb:cc",))])
+        for i in range(12):
+            w.heard(parse(deauth(prefixed)), -75, 6, now=i * 0.2)
+        t = w.get(now=3)["threats"][0]
+        self.assertEqual((t["confidence"], t["target"]), ("high", "home"))
+        self.assertIn("in its prefixes", t["reason"])
 
     def test_slow_deauths_are_not_a_flood(self):
         for i in range(30):
@@ -140,28 +179,28 @@ class WatchTests(unittest.TestCase):
         self.assertIn("offering open, not WPA2", self.w.get(now=10)["threats"][0]["reason"])
 
     def test_the_house_bssid_on_another_channel_while_still_on_its_own(self):
-        self.hear(beacon(HOME_AP, "Castle", channel=6), 5)            # the real one
+        self.hear(beacon(HOME_AP, "Castle", channel=6), 5)  # the real one
         self.hear(beacon(HOME_AP, "Castle", channel=1), 10, channel=1)  # a copy appears
-        self.assertEqual(self.kinds(10), [])                          # not yet: could be a move
-        self.hear(beacon(HOME_AP, "Castle", channel=6), 12)           # the real one carries on
+        self.assertEqual(self.kinds(10), [])  # not yet: could be a move
+        self.hear(beacon(HOME_AP, "Castle", channel=6), 12)  # the real one carries on
         self.hear(beacon(HOME_AP, "Castle", channel=1), 14, channel=1)
         self.assertEqual(self.kinds(14), [("twin", "medium")])
         self.assertIn("while still on its own (6, 149)", self.w.get(now=14)["threats"][0]["reason"])
 
     def test_the_house_moving_channel_is_news_not_a_twin(self):
         for t in range(0, 30, 2):
-            self.hear(beacon(HOME_AP, "Castle", channel=6), t)        # before the restart
+            self.hear(beacon(HOME_AP, "Castle", channel=6), t)  # before the restart
         for t in range(90, 400, 2):
             self.hear(beacon(HOME_AP, "Castle", channel=1), t, channel=1)  # after: only on 1
         st = self.w.get(now=400)
         self.assertEqual((st["threats"], st["alerts"]), ([], []))
         self.assertEqual(st["moved"], [("home", 1)])
-        self.hear(beacon(HOME_AP, "Castle", channel=6), 401)          # back on its own channel
+        self.hear(beacon(HOME_AP, "Castle", channel=6), 401)  # back on its own channel
         self.assertEqual(self.w.get(now=402)["moved"], [])
 
     def test_a_move_seen_mid_switch_still_isnt_a_twin(self):
-        self.hear(beacon(HOME_AP, "Castle", channel=6), 100)          # last beacon on 6
-        for t in range(101, 300):                                     # a channel switch: 1 from now on
+        self.hear(beacon(HOME_AP, "Castle", channel=6), 100)  # last beacon on 6
+        for t in range(101, 300):  # a channel switch: 1 from now on
             self.hear(beacon(HOME_AP, "Castle", channel=1), t, channel=1)
         self.assertEqual(self.kinds(300), [])
 
@@ -206,6 +245,21 @@ class HomeAndScheduleTests(unittest.TestCase):
             f.flush()
             (n,) = load_home(f.name)
         self.assertEqual((n.name, n.bssids, n.security, n.channels), ("home", {"02:00:00:00:00:aa"}, "WPA3", {6}))
+        self.assertEqual(n.prefixes, ())
+
+    def test_load_home_with_prefixes(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
+            json.dump({"networks": [{"name": "home", "ssid": "Castle", "bssids": [], "prefixes": ["0A:BB:CC"]}]}, f)
+            f.flush()
+            (n,) = load_home(f.name)
+        self.assertEqual(n.prefixes, ("0a:bb:cc",))
+
+    def test_siblings(self):
+        home = "a0:11:22:33:44:51"
+        for yes in ("a0:11:22:33:44:5f", "a2:11:22:33:44:51", "ae:11:22:33:44:51"):
+            self.assertTrue(siblings(home, yes), yes)
+        for no in (home, "a0:11:22:33:44:61", "a0:11:22:33:45:51", "a1:11:22:33:44:51", "b0:99:22:33:44:51"):
+            self.assertFalse(siblings(home, no), no)
 
     def test_sixty_percent_at_home(self):
         hops = list(itertools.islice(schedule([6, 149], home_share=0.6), 1000))

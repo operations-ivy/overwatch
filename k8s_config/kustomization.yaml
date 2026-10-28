@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Argo CD renders this directory with Kustomize (it auto-detects this file).
+# The four workloads reference the bare image `whitepatrick/overwatch`; the
+# tag is stamped on all of them from the single `images:` entry below, so a
+# release bumps one line here (plus the version in pyproject.toml) instead of
+# editing every deployment. Build the tag with Jenkins' `build-image` first.
+
+resources:
+  - namespace.yaml
+  - scanner-deployment.yaml
+  - scanner-service.yaml
+  - upnp-deployment.yaml
+  - upnp-service.yaml
+  - web-deployment.yaml
+  - web-service.yaml
+  - web-pdb.yaml
+  - wifi-daemonset.yaml
+  - wifi-service.yaml
+  - ingress.yaml
+  - podmonitor.yaml
+  - metrics-dashboard.yaml
+
+images:
+  - name: whitepatrick/overwatch
+    newTag: 0.8.3

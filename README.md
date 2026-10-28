@@ -38,7 +38,7 @@ frames:
 
 | Kind | How it's recognised | Confidence |
 | --- | --- | --- |
-| Deauth flood | 10 or more deauth/disassoc frames in 5 s for one BSSID | high on the house's networks (any of the frame's addresses: a house BSSID, a sibling of one, or a listed prefix), medium otherwise ("near the house" above -60 dBm, else "a neighbour's") |
+| Deauth flood | 30 or more fresh (non-retried) deauth/disassoc frames in 5 s for one BSSID; the alert names the frame count, whether it was broadcast ("to everyone"), whether both subtypes appeared (the ESP8266/Marauder pattern) and the 802.11 reason code | high on the house's networks (any of the frame's addresses: a house BSSID, a sibling of one, or a listed prefix), medium otherwise ("near the house" above -60 dBm, else "a neighbour's") |
 | Evil twin | a house SSID from a BSSID that isn't the house's | high |
 | Evil twin | a house BSSID offering weaker security (open, WPA2 instead of WPA3, …) | high |
 | Evil twin | a house BSSID on a channel the house doesn't use, while the real one is still heard on a house channel (heard there after the other's first beacon, within 60 s) | medium |
@@ -185,7 +185,8 @@ The Wi-Fi and UPnP watches serve the same endpoints as the scanner.
 
 Settings (environment): `OVERWATCH_PORT` (8080), `OVERWATCH_LEARN_SECONDS` (600,
 scanner), `OVERWATCH_WIFI_IFACE` (`wlmon0`), `OVERWATCH_WIFI_HOME` (the house
-networks' JSON), `OVERWATCH_WIFI_HOME_SHARE` (0.6), `OVERWATCH_SCANNER_URL` and
+networks' JSON), `OVERWATCH_WIFI_HOME_SHARE` (0.6), `OVERWATCH_DEAUTH_FRAMES` (30)
+and `OVERWATCH_DEAUTH_SECONDS` (5, the flood window), `OVERWATCH_SCANNER_URL` and
 `OVERWATCH_WIFI_URL` (web), `OVERWATCH_UPNP_ROUTER` (192.168.1.1),
 `OVERWATCH_UPNP_ALLOW`, `OVERWATCH_UPNP_INTERVAL` (60) and `OVERWATCH_UPNP_URL` (web).
 

@@ -9,6 +9,7 @@ import unittest
 from overwatch.wifi import (
     BEACON,
     DEAUTH,
+    DISASSOC,
     PROBE_RESP,
     Network,
     WifiWatch,
@@ -46,8 +47,11 @@ def beacon(bssid: str, ssid: str, rsn: bytes | None = WPA2_RSN, channel: int = 6
     return mgmt(subtype, "ff:ff:ff:ff:ff:ff", bssid, bssid, body)
 
 
-def deauth(bssid: str, receiver: str = CLIENT) -> bytes:
-    return mgmt(DEAUTH, receiver, bssid, bssid, b"\x07\x00")
+def deauth(bssid: str, receiver: str = CLIENT, reason: int = 7, retry: bool = False, subtype: int = DEAUTH) -> bytes:
+    frame = mgmt(subtype, receiver, bssid, bssid, struct.pack("<H", reason))
+    if retry:
+        frame = bytes([frame[0], frame[1] | 0x08]) + frame[2:]  # frame-control retry bit
+    return frame
 
 
 def captured(frame: bytes, freq: int = 2437, signal: int = -48, fcs: bool = True) -> bytes:
@@ -156,7 +160,7 @@ class WatchTests(unittest.TestCase):
 
     def test_prefixes_in_the_home_file(self):
         prefixed = "0a:bb:cc:dd:ee:77"
-        w = WifiWatch([Network("home", "Castle", {HOME_AP}, "WPA2", {6}, ("0a:bb:cc",))])
+        w = WifiWatch([Network("home", "Castle", {HOME_AP}, "WPA2", {6}, ("0a:bb:cc",))], deauth_frames=10)
         for i in range(12):
             w.heard(parse(deauth(prefixed)), -75, 6, now=i * 0.2)
         t = w.get(now=3)["threats"][0]
@@ -167,6 +171,33 @@ class WatchTests(unittest.TestCase):
         for i in range(30):
             self.hear(deauth(HOME_AP), i)  # one a second
         self.assertEqual(self.kinds(30), [])
+
+    def test_retried_frames_are_not_a_flood(self):
+        # A router resending a deauth to a client that already left: a burst
+        # of retries must not read as an attack (the false-positive bug).
+        for i in range(40):
+            self.hear(deauth(HOME_AP, "ff:ff:ff:ff:ff:ff", retry=True), 100 + i * 0.1)
+        self.assertEqual(self.kinds(104), [])
+
+    def test_the_default_threshold_is_thirty(self):
+        w = WifiWatch(HOME)  # defaults
+        for i in range(25):
+            w.heard(parse(deauth(HOME_AP)), -50, 6, now=i * 0.1)
+        self.assertEqual(w.get(now=3)["threats"], [])  # 25 in 2.5 s is under the bar
+        for i in range(25, 35):
+            w.heard(parse(deauth(HOME_AP)), -50, 6, now=i * 0.1)
+        self.assertEqual([x["kind"] for x in w.get(now=4)["threats"]], ["deauth"])
+
+    def test_a_flood_names_its_reason_code(self):
+        for i in range(12):
+            self.hear(deauth(OTHER_AP, reason=1), i * 0.2, rssi=-75)
+        self.assertIn("reason code 1", self.w.get(now=3)["threats"][0]["reason"])
+
+    def test_both_subtypes_read_as_a_tool(self):
+        for i in range(12):
+            sub = DEAUTH if i % 2 else DISASSOC
+            self.hear(deauth(OTHER_AP, subtype=sub), i * 0.2, rssi=-75)
+        self.assertIn("deauth and disassoc frames", self.w.get(now=3)["threats"][0]["reason"])
 
     def test_a_twin_with_another_bssid(self):
         self.hear(beacon(OTHER_AP, "Castle", rsn=None), 10)

@@ -268,8 +268,9 @@ poetry run python -m overwatch web   # OVERWATCH_SCANNER_URL=http://<scanner>
 
 ## Release
 
-1. Bump `version` in `pyproject.toml` and the image tag in the three
-   Deployments and the DaemonSet.
+1. Bump `version` in `pyproject.toml` and `newTag` in
+   `k8s_config/kustomization.yaml` (one line; Kustomize stamps it onto all
+   three Deployments and the DaemonSet, which carry the bare image name).
 2. Build and push with brick-cicd-config's `build-image` Jenkins job:
    `IMAGE=whitepatrick/overwatch`, `REF=<full commit>`, `TAG=<version>`. It
    builds reproducibly and labels the image with the commit, which the

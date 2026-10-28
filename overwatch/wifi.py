@@ -154,6 +154,8 @@ class Frame:
     ssid: str | None = None
     security: str | None = None
     channel: int = 0  # from the DS parameter set: the channel the AP says it's on
+    retry: bool = False  # the frame-control retry bit: a resend, not a fresh frame
+    reason: int | None = None  # deauth/disassoc reason code (802.11 §9.4.1.7)
 
 
 def parse(frame: bytes) -> Frame | None:
@@ -161,6 +163,9 @@ def parse(frame: bytes) -> Frame | None:
     if len(frame) < 24 or (frame[0] >> 2) & 3 != 0:
         return None
     f = Frame(frame[0] >> 4, mac(frame[4:10]), mac(frame[10:16]), mac(frame[16:22]))
+    f.retry = bool(frame[1] & 0x08)
+    if f.subtype in (DEAUTH, DISASSOC) and len(frame) >= 26:
+        (f.reason,) = struct.unpack_from("<H", frame, 24)
     if f.subtype in (BEACON, PROBE_RESP) and len(frame) >= 36:
         (capability,) = struct.unpack_from("<H", frame, 34)
         ies: dict[int, list[bytes]] = {}
@@ -261,7 +266,10 @@ class WifiWatch:
     def __init__(
         self,
         home: list[Network] | None = None,
-        deauth_frames: int = 10,
+        # 30 in 5 s (6/s) sits well above a router's own deauths and well
+        # below any real flood: the quietest tool (ESP8266 Deauther) sends
+        # ~10 per target per second, aireplay-ng and ESP32 Marauder hundreds.
+        deauth_frames: int = 30,
         deauth_seconds: float = 5,
         karma_ssids: int = 4,
         karma_seconds: float = 60,
@@ -354,7 +362,11 @@ class WifiWatch:
         with self._lock:
             self.frame_counts[SUBTYPES.get(f.subtype, "other")] += 1
             if f.subtype in (DEAUTH, DISASSOC):
-                self._deauth(f, rssi, channel, now)
+                # A retried frame is the AP resending to a client that already
+                # left, not a fresh flood frame: counting it is how a routine
+                # disconnect used to read as an attack.
+                if not f.retry:
+                    self._deauth(f, rssi, channel, now)
             elif f.subtype in (BEACON, PROBE_RESP):
                 self.aps[self._key(f.bssid)] = now
                 if f.ssid:
@@ -371,20 +383,24 @@ class WifiWatch:
             t.rssi, t.channel = rssi if rssi is not None else t.rssi, channel or t.channel
             return
         q = self._deauths.setdefault(f.bssid, deque())
-        q.append((now, broadcast))
+        q.append((now, broadcast, SUBTYPES.get(f.subtype, "deauth")))
         while q and now - q[0][0] > self.deauth_seconds:
             q.popleft()
         if len(q) < self.deauth_frames:
             return
         net, how = self._attacked(f)
-        broadcast = any(b for _, b in q)
-        reason = f"{len(q)} deauth/disassoc frames in {self.deauth_seconds:g} s" + (
-            ", to everyone" if broadcast else ""
-        )
+        broadcast = any(b for _, b, _ in q)
+        # Both subtypes paired for one BSSID is the ESP8266/Marauder pattern;
+        # a router sends one kind at a time.
+        kinds = {s for _, _, s in q}
+        what = "deauth and disassoc" if len(kinds) == 2 else ("disassoc" if "disassoc" in kinds else "deauth")
+        reason = f"{len(q)} {what} frames in {self.deauth_seconds:g} s" + (", to everyone" if broadcast else "")
         if how:
             reason += f", on a {'sibling BSSID' if how == 'sibling' else 'BSSID in its prefixes'}"
         if self._key(f.bssid) not in self.aps:
             reason += ", BSSID not beaconing"
+        if f.reason is not None:
+            reason += f", reason code {f.reason}"
         if net:
             target = net.name
         elif rssi is not None and rssi > self.near_dbm:
@@ -634,7 +650,14 @@ def main(host: str, port: int, iface: str, home_path: str, home_share: float = 0
         log.info("watching %d house network(s)", len(home))
     else:
         log.warning("no house networks (%s): deauth and karma only, no twins", home_path or "unset")
-    watch, hub = WifiWatch(home), Hub()
+    watch, hub = (
+        WifiWatch(
+            home,
+            deauth_frames=int(os.environ.get("OVERWATCH_DEAUTH_FRAMES", "30")),
+            deauth_seconds=float(os.environ.get("OVERWATCH_DEAUTH_SECONDS", "5")),
+        ),
+        Hub(),
+    )
     threading.Thread(target=capture_forever, args=(watch, hub, iface), daemon=True).start()
     threading.Thread(target=hop_forever, args=(watch, iface, home_share), daemon=True).start()
     log.info("wifi watch on %s:%d", host, port)

@@ -37,6 +37,8 @@ spec:
         - name: http
           containerPort: 8792
         env:
+        - name: LOG_FORMAT
+          value: json
         - name: OVERWATCH_PORT
           value: "8792"
         - name: OVERWATCH_UPNP_ROUTER

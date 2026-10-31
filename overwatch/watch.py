@@ -19,14 +19,15 @@ normal count of each kind; an alert is a kind above its normal count for
 from __future__ import annotations
 
 import hashlib
-import logging
 import os
 import threading
 import time
 from collections import Counter
 from dataclasses import dataclass, field
 
-log = logging.getLogger(__name__)
+import brick_observe
+
+log = brick_observe.get_logger(__name__)
 
 
 def uuid16(n: int) -> str:
@@ -296,7 +297,7 @@ class Watch:
                             "rssi": newest.rssi,
                         }
                     )
-                    log.info("overwatch alert: %s (%d nearby, normally %d)", kind, len(devs), self.normal.get(kind, 0))
+                    log.info("overwatch alert", kind=kind, nearby=len(devs), normal=self.normal.get(kind, 0))
             for kind in list(self.over_since):
                 if kind not in nearby:
                     del self.over_since[kind]

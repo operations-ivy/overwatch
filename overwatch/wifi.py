@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import os
 import socket
 import struct
@@ -42,7 +41,9 @@ import time
 from collections import Counter, deque
 from dataclasses import dataclass
 
-log = logging.getLogger(__name__)
+import brick_observe
+
+log = brick_observe.get_logger(__name__)
 
 BROADCAST = "ff:ff:ff:ff:ff:ff"
 BEACON, PROBE_RESP, DISASSOC, DEAUTH = 8, 5, 10, 12
@@ -351,7 +352,7 @@ class WifiWatch:
                     "rssi": extra.get("rssi"),
                 }
             )
-            log.info("overwatch wifi alert: %s (%s)", kind, reason)
+            log.info("overwatch wifi alert", kind=kind, reason=reason)
         t.last, t.confidence, t.target, t.reason = now, confidence, target, reason
         for k, v in extra.items():
             if v is not None:
@@ -564,7 +565,7 @@ def hop_forever(watch: WifiWatch, iface: str, home_share: float = 0.6) -> None:
             watch.channel = channel
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             bad.add(channel)  # not allowed here (regulatory domain) or not on this dongle
-            log.info("skipping channel %d", channel)
+            log.info("skipping channel", channel=channel)
             continue
         time.sleep(seconds)
 
@@ -579,7 +580,7 @@ def capture_forever(watch: WifiWatch, hub, iface: str, retry_seconds: float = 30
             sock.bind((iface, 0))
             sock.settimeout(1)
             watch.error, watch.scanning = "", True
-            log.info("capturing on %s", iface)
+            log.info("capturing", iface=iface)
             last_tick = 0.0
             while True:
                 try:
@@ -605,7 +606,7 @@ def capture_forever(watch: WifiWatch, hub, iface: str, retry_seconds: float = 30
             watch.error, watch.scanning = "no Wi-Fi monitor", False
             watch.failures += 1
             hub.publish(state(watch))
-            log.warning("capture failed: %s", e)
+            log.warning("capture failed", error=str(e))
         time.sleep(retry_seconds)
 
 
@@ -647,9 +648,9 @@ def main(host: str, port: int, iface: str, home_path: str, home_share: float = 0
     home: list[Network] = []
     if home_path and os.path.exists(home_path):
         home = load_home(home_path)
-        log.info("watching %d house network(s)", len(home))
+        log.info("watching house networks", networks=len(home))
     else:
-        log.warning("no house networks (%s): deauth and karma only, no twins", home_path or "unset")
+        log.warning("no house networks: deauth and karma only, no twins", path=home_path or "unset")
     watch, hub = (
         WifiWatch(
             home,
@@ -660,5 +661,5 @@ def main(host: str, port: int, iface: str, home_path: str, home_share: float = 0
     )
     threading.Thread(target=capture_forever, args=(watch, hub, iface), daemon=True).start()
     threading.Thread(target=hop_forever, args=(watch, iface, home_share), daemon=True).start()
-    log.info("wifi watch on %s:%d", host, port)
+    log.info("wifi watch listening", host=host, port=port)
     make_server(watch, hub, host, port, registry=wifi_registry).serve_forever()

@@ -37,6 +37,8 @@ spec:
         - name: http
           containerPort: 8080
         env:
+        - name: LOG_FORMAT
+          value: json
         # The first 10 minutes after each start learn the house's usual counts.
         - name: OVERWATCH_LEARN_SECONDS
           value: "600"

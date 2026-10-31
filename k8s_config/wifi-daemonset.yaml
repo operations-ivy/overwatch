@@ -36,6 +36,8 @@ spec:
         - name: http
           containerPort: 8791
         env:
+        - name: LOG_FORMAT
+          value: json
         - name: OVERWATCH_PORT
           value: "8791"
         - name: OVERWATCH_WIFI_IFACE

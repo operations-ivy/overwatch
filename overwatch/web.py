@@ -20,17 +20,18 @@ if the scanner goes away, and the page says so.
 from __future__ import annotations
 
 import json
-import logging
 import threading
 import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import brick_observe
+
 from . import metrics
 from .hub import Hub, events, stream
 
-log = logging.getLogger(__name__)
+log = brick_observe.get_logger(__name__)
 PAGE = (Path(__file__).parent / "static" / "index.html").read_bytes()
 
 
@@ -60,12 +61,12 @@ class Upstream:
                         continue  # heartbeat
                     self.scanner = json.loads(data)
                     if self.error:
-                        log.info("%s back", self.name)
+                        log.info("feed back", feed=self.name)
                     self.error, self.ready = "", True
                     self.on_change()
         except Exception as e:  # scanner restarting, moved, or not up yet
             if not self.error:
-                log.warning("%s unreachable: %s", self.name, e)
+                log.warning("feed unreachable", feed=self.name, error=str(e))
         self.error = f"{self.name} unreachable"
         self.drops += 1
         self.on_change()
@@ -175,8 +176,8 @@ def make_server(upstream, hub: Hub, host: str, port: int, heartbeat: float = 5) 
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, *args):
-            pass
+        def log_message(self, format, *args):
+            log.debug("request", line=format % args)  # debug: probes come every few seconds
 
     return ThreadingHTTPServer((host, port), Handler)
 
@@ -185,5 +186,5 @@ def main(host: str, port: int, feeds: list[tuple[str, str]]) -> None:
     hub = Hub()
     relay = Relay(feeds, hub)
     threading.Thread(target=relay.run, daemon=True).start()
-    log.info("web on %s:%d, following %s", host, port, ", ".join(f"{f.name} ({f.url})" for f in relay.feeds))
+    log.info("web listening", host=host, port=port, feeds=[f.name for f in relay.feeds])
     make_server(relay, hub, host, port).serve_forever()

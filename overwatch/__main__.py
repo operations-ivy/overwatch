@@ -18,9 +18,10 @@ and _UPNP_URL).
 
 from __future__ import annotations
 
-import logging
 import os
 import sys
+
+import brick_observe
 
 from . import scanner, upnp, web, wifi
 
@@ -38,8 +39,8 @@ def web_feeds(env) -> list[tuple[str, str]]:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
+    brick_observe.init(f"overwatch-{mode or 'cli'}")
     port = int(os.environ.get("OVERWATCH_PORT", "8080"))
     if mode == "scan":
         scanner.main("0.0.0.0", port, float(os.environ.get("OVERWATCH_LEARN_SECONDS", "600")))

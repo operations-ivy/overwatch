@@ -54,6 +54,8 @@ spec:
         - name: http
           containerPort: 8080
         env:
+        - name: LOG_FORMAT
+          value: json
         # Every feed, in page order; the first is required (ready on it alone).
         # A new scanner is one more name=url here: its panel needs no page change.
         - name: OVERWATCH_FEEDS

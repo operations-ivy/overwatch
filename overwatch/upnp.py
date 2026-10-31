@@ -22,7 +22,6 @@ that's what's needed to act on one. Metrics are counts only.
 from __future__ import annotations
 
 import fnmatch
-import logging
 import re
 import socket
 import threading
@@ -34,7 +33,9 @@ import xml.etree.ElementTree as ET
 from collections import Counter
 from dataclasses import dataclass
 
-log = logging.getLogger(__name__)
+import brick_observe
+
+log = brick_observe.get_logger(__name__)
 
 SSDP = ("239.255.255.250", 1900)
 IGD_TYPES = (
@@ -261,7 +262,11 @@ class UpnpWatch:
                         )
                         self.alert_counts["unexpected"] += 1
                         log.info(
-                            "overwatch upnp alert: %s %s -> %s:%s", m.key, m.description, m.client, m.internal_port
+                            "overwatch upnp alert",
+                            mapping=m.key,
+                            description=m.description,
+                            client=m.client,
+                            internal_port=m.internal_port,
                         )
             for key in set(self.mappings) - set(current):
                 self.first.pop(key, None)
@@ -310,7 +315,7 @@ def poll_forever(watch: UpnpWatch, hub, gateway: Gateway, interval: float = 60) 
             watch.update(gateway.mappings())
         except Exception as e:  # router rebooting, UPnP turned off, network blip
             if watch.scanning or not watch.error:
-                log.warning("upnp: %s", e)
+                log.warning("upnp poll failed", error=str(e))
             watch.failed("router not answering UPnP")
             gateway.control = None  # rediscover: its port changes when it reboots
         hub.publish(state(watch))
@@ -327,6 +332,6 @@ def main(host: str, port: int, router: str, allow: str, interval: float = 60) ->
 
     rules = parse_allow(allow)
     watch, hub = UpnpWatch(rules), Hub()
-    log.info("upnp watch on %s:%d, router %s, %d allowed", host, port, router, len(rules))
+    log.info("upnp watch listening", host=host, port=port, router=router, allowed=len(rules))
     threading.Thread(target=poll_forever, args=(watch, hub, Gateway(router), interval), daemon=True).start()
     make_server(watch, hub, host, port, registry=upnp_registry).serve_forever()

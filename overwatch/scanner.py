@@ -16,16 +16,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import brick_observe
 
 from . import metrics
 from .hub import Hub, stream
 from .watch import Watch, classify, describe
 
-log = logging.getLogger(__name__)
+log = brick_observe.get_logger(__name__)
 
 
 def address_type(device) -> str:
@@ -77,7 +78,7 @@ def scan_forever(watch: Watch, hub: Hub, retry_seconds: float = 30) -> None:
             watch.error, watch.scanning = "no Bluetooth", False
             watch.failures += 1
             hub.publish(state(watch))
-            log.warning("scan failed: %s", e)
+            log.warning("scan failed", error=str(e))
         time.sleep(retry_seconds)
 
 
@@ -130,8 +131,8 @@ def make_server(
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, *args):
-            pass  # probes every few seconds; errors still reach the log
+        def log_message(self, format, *args):
+            log.debug("request", line=format % args)  # debug: probes come every few seconds
 
     return ThreadingHTTPServer((host, port), Handler)
 
@@ -139,5 +140,5 @@ def make_server(
 def main(host: str, port: int, learn_seconds: float) -> None:
     watch, hub = Watch(learn_seconds=learn_seconds), Hub()
     threading.Thread(target=scan_forever, args=(watch, hub), daemon=True).start()
-    log.info("scanner on %s:%d", host, port)
+    log.info("scanner listening", host=host, port=port)
     make_server(watch, hub, host, port).serve_forever()

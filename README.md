@@ -11,7 +11,7 @@ Each kind has a confidence; only high and medium ones raise alerts.
 
 | Kind | How it's recognised | Confidence |
 | --- | --- | --- |
-| Apple Find My tag | Apple manufacturer data, offline-finding type `0x12` | high |
+| Apple Find My tag | Apple manufacturer data, offline-finding type `0x12` | low (shows, never alerts: below) |
 | Samsung SmartTag | service `0xFD5A` | high |
 | Tile tracker | services `0xFEED` / `0xFEEC` | high |
 | Google Find My tag | Eddystone frames `0x40` / `0x41` | medium |
@@ -101,15 +101,12 @@ same way). A Find My tag says so in its advert's length byte (`0x02`, a short
 key, once it's been away from it a while), a Google tag in its frame type
 (`0x40` near, `0x41` away). The page shows these as "near their owner".
 
-The house's own tags can't be told apart from a stranger's once they're away
-from their owner (Find My rotates every address and key so nobody can), so
-the scanner's `OVERWATCH_HOME_TAGS` (`KIND=COUNT,...`, `findmy=4` in
-`k8s_config/scanner-deployment.yaml`) says how many the house owns. Up to
-that many away from their owner are usual, less those heard near it: with
-three of the house's four AirTags near the owner's phone, a second tag away
-from its owner alerts; with the owner out and all four away, nothing does.
-A tag only counts where the scanner's radio hears it (brick666): one next to
-another node is just a weak signal.
+Find My tags show on the page but never alert (low confidence, since
+2026-11-03). Find My rotates every tag's address and key so only its owner
+can tell which tag is which: a fixed scanner can't tell the house's AirTags
+from a stranger's once they're away from their owner, and every one alerted.
+The real threat, a tag following someone, is what iPhones (and Android)
+already warn about: they know their own tags and go where you go.
 
 ## The page
 

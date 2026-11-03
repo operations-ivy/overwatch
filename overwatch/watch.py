@@ -17,10 +17,7 @@ normal count of each kind; an alert is a kind above its normal count for
 
 A tracker near its owner (a Find My tag's short advert, a Google tag's
 frame 0x40) is with someone in the room, not following anyone: it shows,
-but never counts towards an alert. `home` is how many of a kind the house
-owns (`OVERWATCH_HOME_TAGS`, e.g. "findmy=4"): the house's own tags away
-from their owner are usual too, so up to `home` minus those near their
-owner never alert.
+but never counts towards an alert.
 """
 
 from __future__ import annotations
@@ -53,7 +50,7 @@ class Kind:
 KINDS = {
     k.key: k
     for k in (
-        Kind("findmy", "Apple Find My tag", "high"),
+        Kind("findmy", "Apple Find My tag", "low"),  # shows, never alerts: see the README
         Kind("smarttag", "Samsung SmartTag", "high"),
         Kind("tile", "Tile tracker", "high"),
         Kind("googletag", "Google Find My tag", "medium"),
@@ -159,21 +156,6 @@ FINDMY_NEAR, FINDMY_AWAY = 0x02, 0x19
 NEAR, AWAY = "near its owner", "away from its owner"
 
 
-def parse_home(text: str) -> dict[str, int]:
-    """OVERWATCH_HOME_TAGS: comma-separated KIND=COUNT, the trackers the house
-    owns. Empty: none."""
-    home: dict[str, int] = {}
-    for item in (i.strip() for i in text.split(",")):
-        if not item:
-            continue
-        kind, _, count = item.partition("=")
-        kind = kind.strip()
-        if kind not in KINDS or not count.strip().isdigit():
-            raise ValueError(f"OVERWATCH_HOME_TAGS: {item!r} isn't KIND=COUNT with a known kind")
-        home[kind] = int(count)
-    return home
-
-
 def service_label(uuid: str) -> str:
     uuid = uuid.lower()
     if uuid.startswith("0000") and uuid.endswith(UUID_BASE):
@@ -243,11 +225,9 @@ class Watch:
         gone_seconds: float = 120,
         present_seconds: float = 30,
         started: float | None = None,
-        home: dict[str, int] | None = None,
     ):
         self.learn_seconds, self.linger_seconds, self.gone_seconds = learn_seconds, linger_seconds, gone_seconds
         self.present_seconds = present_seconds
-        self.home = dict(home or {})
         self.started = time.time() if started is None else started
         self.salt = os.urandom(16)
         self.devices: dict[str, Sighting] = {}
@@ -314,7 +294,7 @@ class Watch:
                 if learning:
                     self.normal[kind] = max(self.normal.get(kind, 0), len(devs))
                     continue
-                if KINDS[kind].confidence == "low" or len(devs) <= self._usual(kind, len(everyone) - len(devs)):
+                if KINDS[kind].confidence == "low" or len(devs) <= self.normal.get(kind, 0):
                     self.over_since.pop(kind, None)
                     continue
                 since = self.over_since.setdefault(kind, now)
@@ -331,7 +311,7 @@ class Watch:
                                 "confidence": KINDS[kind].confidence,
                                 "at": now,
                                 "count": len(devs),
-                                "normal": self._usual(kind, len(everyone) - len(devs)),
+                                "normal": self.normal.get(kind, 0),
                                 "rssi": newest.rssi,
                                 **tracing.carried(),
                             }
@@ -341,11 +321,6 @@ class Watch:
                 if kind not in nearby:
                     del self.over_since[kind]
             self.alerts = [a for a in self.alerts if now - a["at"] < 1800]
-
-    def _usual(self, kind: str, with_owner: int) -> int:
-        """How many of a kind away from their owner are usual: the learned
-        count, or the house's own not accounted for by those near their owner."""
-        return max(self.normal.get(kind, 0), self.home.get(kind, 0) - with_owner)
 
     def panel(self, st: dict) -> dict:
         """This feed in the page's common shape (panel.py)."""
@@ -369,8 +344,6 @@ class Watch:
                         "count": len(v),
                         "normal": self.normal.get(k, 0),
                         "with_owner": owned[k],
-                        "usual": self._usual(k, owned[k]),
-                        "home": self.home.get(k, 0),
                         "closest": max(s.rssi for _, s in v),
                         "devices": [
                             {

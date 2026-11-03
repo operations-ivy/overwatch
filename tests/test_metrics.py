@@ -37,10 +37,10 @@ class ScannerMetricsTests(unittest.TestCase):
         self.assertNotIn("overwatch_wifi", text)  # the scanner has no Wi-Fi
 
     def test_alerts_are_counted(self):
-        self.watch.advert("AA", "findmy", -60, now=100)
+        self.watch.advert("AA", "tile", -60, now=100)
         self.watch.tick(now=100)
         self.watch.tick(now=101)
-        self.assertIn('overwatch_ble_alerts_total{kind="findmy"} 1.0', metrics(self.base))
+        self.assertIn('overwatch_ble_alerts_total{kind="tile"} 1.0', metrics(self.base))
 
     def test_requests_counted(self):
         get(self.base + "/health")

@@ -24,7 +24,7 @@ import brick_observe
 
 from . import metrics, tracing
 from .hub import Hub, stream
-from .watch import Watch, classify, describe, parse_home
+from .watch import Watch, classify, describe
 
 log = brick_observe.get_logger(__name__)
 
@@ -135,8 +135,8 @@ def make_server(
     return ThreadingHTTPServer((host, port), Handler)
 
 
-def main(host: str, port: int, learn_seconds: float, home: str = "") -> None:
-    watch, hub = Watch(learn_seconds=learn_seconds, home=parse_home(home)), Hub()
+def main(host: str, port: int, learn_seconds: float) -> None:
+    watch, hub = Watch(learn_seconds=learn_seconds), Hub()
     threading.Thread(target=scan_forever, args=(watch, hub), daemon=True).start()
-    log.info("scanner listening", host=host, port=port, home=watch.home)
+    log.info("scanner listening", host=host, port=port)
     make_server(watch, hub, host, port).serve_forever()

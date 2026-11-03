@@ -4,7 +4,7 @@ import json
 import unittest
 
 from overwatch import panel
-from overwatch.watch import Watch, classify, describe, parse_home, uuid16
+from overwatch.watch import Watch, classify, describe, uuid16
 
 
 class ClassifyTests(unittest.TestCase):
@@ -37,7 +37,7 @@ class WatchTests(unittest.TestCase):
     def setUp(self):
         self.w = Watch(learn_seconds=600, linger_seconds=120, gone_seconds=120, started=0)
 
-    def heard(self, t, *addresses, kind="findmy", rssi=-60):
+    def heard(self, t, *addresses, kind="tile", rssi=-60):
         for a in addresses:
             self.w.advert(a, kind, rssi, now=t)
         self.w.tick(now=t)
@@ -45,7 +45,7 @@ class WatchTests(unittest.TestCase):
     def test_the_house_normal_is_learned_and_never_alerts(self):
         for t in range(0, 1200, 10):
             self.heard(t, "AA", "BB")
-        self.assertEqual(self.w.normal, {"findmy": 2})
+        self.assertEqual(self.w.normal, {"tile": 2})
         self.assertEqual(self.w.alerts, [])
 
     def test_a_newcomer_lingering_past_the_normal_alerts_once(self):
@@ -58,7 +58,7 @@ class WatchTests(unittest.TestCase):
             self.heard(t, "AA", "CC")
         self.assertEqual(len(self.w.alerts), 1)
         a = self.w.alerts[0]
-        self.assertEqual((a["kind"], a["count"], a["normal"]), ("findmy", 2, 1))
+        self.assertEqual((a["kind"], a["count"], a["normal"]), ("tile", 2, 1))
 
     def test_a_passer_by_does_not_alert(self):
         for t in range(0, 600, 10):
@@ -101,62 +101,43 @@ class WatchTests(unittest.TestCase):
 NEAR, AWAY = {"mode": "near its owner"}, {"mode": "away from its owner"}
 
 
-class HomeTagTests(unittest.TestCase):
-    """The house owns 4 AirTags; a tag near its owner is with someone here."""
+class OwnerTests(unittest.TestCase):
+    """A tracker near its owner is with someone in the room."""
 
-    def watch(self, home=None):
-        return Watch(learn_seconds=600, linger_seconds=120, gone_seconds=120, started=0, home=home)
-
-    def heard(self, w, t, near=(), away=()):
+    def heard(self, w, t, near=(), away=(), kind="tile"):
         for a in near:
-            w.advert(a, "findmy", -40, now=t, details=NEAR)
+            w.advert(a, kind, -40, now=t, details=NEAR)
         for a in away:
-            w.advert(a, "findmy", -40, now=t, details=AWAY)
+            w.advert(a, kind, -40, now=t, details=AWAY)
         w.tick(now=t)
 
     def test_tags_near_their_owner_never_alert(self):
-        w = self.watch()
+        w = Watch(learn_seconds=600, linger_seconds=120, gone_seconds=120, started=0)
         for t in range(0, 600, 10):
             self.heard(w, t, away=["X"])
         for t in range(600, 1200, 10):
             self.heard(w, t, near=["A", "B", "C"], away=["X"])
-        self.assertEqual(w.normal, {"findmy": 1})
+        self.assertEqual(w.normal, {"tile": 1})
         self.assertEqual(w.alerts, [])
-        k = w.get(now=1190)["kinds"][0]
-        self.assertEqual((k["count"], k["with_owner"], k["usual"]), (4, 3, 1))
+        self.assertEqual(w.get(now=1190)["kinds"][0]["with_owner"], 3)
         self.assertEqual(panel.bluetooth({**w.get(now=1190), "scanning": True})["headline"]["word"], "ALL CLEAR")
 
-    def test_the_house_tags_away_from_their_owner_are_usual(self):
-        w = self.watch({"findmy": 4})
+    def test_one_away_from_its_owner_still_alerts(self):
+        w = Watch(learn_seconds=600, linger_seconds=120, gone_seconds=120, started=0)
         for t in range(0, 600, 10):
-            self.heard(w, t, near=["A", "B", "C"], away=["X"])  # learned: 1 away
-        for t in range(600, 1800, 10):
-            self.heard(w, t, away=["A2", "B2", "C2", "X"])  # the owner went out: all 4 separated
+            self.heard(w, t, near=["A"])
+        for t in range(600, 900, 10):
+            self.heard(w, t, near=["A"], away=["STRANGER"])
+        self.assertEqual(len(w.alerts), 1)
+
+    def test_find_my_tags_show_but_never_alert(self):
+        w = Watch(learn_seconds=600, linger_seconds=120, gone_seconds=120, started=0)
+        for t in range(0, 600, 10):
+            self.heard(w, t, kind="findmy")
+        for t in range(600, 1200, 10):
+            self.heard(w, t, away=["S1", "S2", "S3"], kind="findmy")
         self.assertEqual(w.alerts, [])
-
-    def test_a_stranger_tag_still_alerts_while_the_owner_is_home(self):
-        w = self.watch({"findmy": 4})
-        for t in range(0, 600, 10):
-            self.heard(w, t, near=["A", "B", "C"], away=["X"])
-        for t in range(600, 900, 10):
-            self.heard(w, t, near=["A", "B", "C"], away=["X", "STRANGER"])
-        self.assertEqual(len(w.alerts), 1)
-        self.assertEqual((w.alerts[0]["count"], w.alerts[0]["normal"]), (2, 1))
-
-    def test_more_than_the_house_owns_alerts(self):
-        w = self.watch({"findmy": 4})
-        for t in range(0, 600, 10):
-            self.heard(w, t, away=["X"])
-        for t in range(600, 900, 10):
-            self.heard(w, t, away=["A", "B", "C", "X", "STRANGER"])
-        self.assertEqual(len(w.alerts), 1)
-
-    def test_parse_home(self):
-        self.assertEqual(parse_home(" findmy=4, tile=1 "), {"findmy": 4, "tile": 1})
-        self.assertEqual(parse_home(""), {})
-        for bad in ("findmy", "airtag=4", "findmy=four"):
-            with self.assertRaises(ValueError):
-                parse_home(bad)
+        self.assertEqual(w.get(now=1190)["kinds"][0]["count"], 3)
 
 
 class DescribeTests(unittest.TestCase):

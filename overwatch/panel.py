@@ -57,12 +57,12 @@ def status(error: str, ready: bool, ready_text: str, starting: str = "starting")
 
 def bluetooth(st: dict) -> dict:
     kinds, learning, error = st.get("kinds", []), st.get("learning", 0) > 0, st.get("error", "")
-    above = [k for k in kinds if not learning and k["confidence"] != "low" and away(k) > usual(k)]
+    above = [k for k in kinds if not learning and k["confidence"] != "low" and away(k) > k["normal"]]
     if error:
         headline = {"severity": 3, "word": "SCANNER DOWN", "tone": "bad", "line": f"{error}; trying again every 30 s."}
     elif above:
         headline = {"severity": 2, "word": "HEADS UP", "tone": "idle",
-                    "line": " · ".join(f"{away(k)} × {k['label']} away from their owner, usually {usual(k)}"
+                    "line": " · ".join(f"{away(k)} × {k['label']} away from their owner, usually {k['normal']}"
                                        for k in above)}
     elif learning:
         headline = {"severity": 1, "word": "LEARNING", "tone": "idle",
@@ -80,12 +80,11 @@ def bluetooth(st: dict) -> dict:
         rows.append({
             "key": k["kind"], "name": k["label"],
             "sub": f"{k['confidence']} confidence · closest {nearness(k['closest'])} ({k['closest']} dBm)"
-                   + (f" · {k['with_owner']} near their owner" if k.get("with_owner") else "")
-                   + (f" · the house owns {k['home']}" if k.get("home") else ""),
+                   + (f" · {k['with_owner']} near their owner" if k.get("with_owner") else ""),
             "icon": KIND_ICON.get(k["kind"], "bluetooth"), "tone": "cyan" if k["tracker"] else "magenta",
             "dim": k["confidence"] == "low",
             "cells": [{"text": str(k["count"]), "tone": "idle" if hot else ""},
-                      {"text": "…" if learning else str(usual(k)), "tone": "dim"}],
+                      {"text": "…" if learning else str(k["normal"]), "tone": "dim"}],
             "verdict": {"text": verdict[0], "tone": verdict[1]}, "hot": hot,
             "details": [device(d) for d in k.get("devices", [])],
         })
@@ -110,10 +109,6 @@ def bluetooth(st: dict) -> dict:
 def away(k: dict) -> int:
     """How many of a kind count towards an alert: those not near their owner."""
     return k["count"] - k.get("with_owner", 0)
-
-
-def usual(k: dict) -> int:
-    return k.get("usual", k["normal"])
 
 
 def device(d: dict) -> dict:

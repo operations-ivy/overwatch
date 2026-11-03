@@ -57,12 +57,13 @@ def status(error: str, ready: bool, ready_text: str, starting: str = "starting")
 
 def bluetooth(st: dict) -> dict:
     kinds, learning, error = st.get("kinds", []), st.get("learning", 0) > 0, st.get("error", "")
-    above = [k for k in kinds if not learning and k["confidence"] != "low" and k["count"] > k["normal"]]
+    above = [k for k in kinds if not learning and k["confidence"] != "low" and away(k) > k["normal"]]
     if error:
         headline = {"severity": 3, "word": "SCANNER DOWN", "tone": "bad", "line": f"{error}; trying again every 30 s."}
     elif above:
         headline = {"severity": 2, "word": "HEADS UP", "tone": "idle",
-                    "line": " · ".join(f"{k['count']} × {k['label']}, usually {k['normal']}" for k in above)}
+                    "line": " · ".join(f"{away(k)} × {k['label']} away from their owner, usually {k['normal']}"
+                                       for k in above)}
     elif learning:
         headline = {"severity": 1, "word": "LEARNING", "tone": "idle",
                     "line": f"Learning what's normal here: {-(-st['learning'] // 60)} min left."}
@@ -78,7 +79,8 @@ def bluetooth(st: dict) -> dict:
                    else ["above usual", "bad"] if hot else ["usual", "ok"])
         rows.append({
             "key": k["kind"], "name": k["label"],
-            "sub": f"{k['confidence']} confidence · closest {nearness(k['closest'])} ({k['closest']} dBm)",
+            "sub": f"{k['confidence']} confidence · closest {nearness(k['closest'])} ({k['closest']} dBm)"
+                   + (f" · {k['with_owner']} near their owner" if k.get("with_owner") else ""),
             "icon": KIND_ICON.get(k["kind"], "bluetooth"), "tone": "cyan" if k["tracker"] else "magenta",
             "dim": k["confidence"] == "low",
             "cells": [{"text": str(k["count"]), "tone": "idle" if hot else ""},
@@ -102,6 +104,11 @@ def bluetooth(st: dict) -> dict:
         "empty": "Nothing of interest nearby.",
         "alerts": st.get("alerts", []),
     }
+
+
+def away(k: dict) -> int:
+    """How many of a kind count towards an alert: those not near their owner."""
+    return k["count"] - k.get("with_owner", 0)
 
 
 def device(d: dict) -> dict:

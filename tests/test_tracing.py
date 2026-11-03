@@ -44,7 +44,7 @@ def test_old_snapshots_without_alerts_or_traceparents_are_fine():
 
 def test_alerts_stay_json_for_the_hub():
     watch = Watch(learn_seconds=0, linger_seconds=0)
-    watch.advert("AA", "findmy", -60, now=100)
+    watch.advert("AA", "tile", -60, now=100)
     watch.tick(now=100)
     watch.tick(now=101)
     assert Hub().publish(watch.get())

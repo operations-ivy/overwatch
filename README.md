@@ -11,7 +11,7 @@ Each kind has a confidence; only high and medium ones raise alerts.
 
 | Kind | How it's recognised | Confidence |
 | --- | --- | --- |
-| Apple Find My tag | Apple manufacturer data, offline-finding type `0x12` | high |
+| Apple Find My tag | Apple manufacturer data, offline-finding type `0x12` | low (shows, never alerts: below) |
 | Samsung SmartTag | service `0xFD5A` | high |
 | Tile tracker | services `0xFEED` / `0xFEEC` | high |
 | Google Find My tag | Eddystone frames `0x40` / `0x41` | medium |
@@ -93,6 +93,20 @@ Households are full of trackers, so for 10 minutes after each start overwatch
 learns the usual count of each kind. After that, a high or medium kind above
 its usual count for two minutes raises an alert. Only devices heard in the
 last 30 s count towards an alert, so a passer-by doesn't.
+
+A tracker near its owner never counts towards an alert: it's with someone in
+the room, not following anyone (Apple's own unwanted-tracking alerts work the
+same way). A Find My tag says so in its advert's length byte (`0x02`, a short
+"nearby" advert, while its owner's iPhone is close; `0x19`, its full public
+key, once it's been away from it a while), a Google tag in its frame type
+(`0x40` near, `0x41` away). The page shows these as "near their owner".
+
+Find My tags show on the page but never alert (low confidence, since
+2026-11-03). Find My rotates every tag's address and key so only its owner
+can tell which tag is which: a fixed scanner can't tell the house's AirTags
+from a stranger's once they're away from their owner, and every one alerted.
+The real threat, a tag following someone, is what iPhones (and Android)
+already warn about: they know their own tags and go where you go.
 
 ## The page
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 
+from overwatch import panel
 from overwatch.watch import Watch, classify, describe, uuid16
 
 
@@ -36,7 +37,7 @@ class WatchTests(unittest.TestCase):
     def setUp(self):
         self.w = Watch(learn_seconds=600, linger_seconds=120, gone_seconds=120, started=0)
 
-    def heard(self, t, *addresses, kind="findmy", rssi=-60):
+    def heard(self, t, *addresses, kind="tile", rssi=-60):
         for a in addresses:
             self.w.advert(a, kind, rssi, now=t)
         self.w.tick(now=t)
@@ -44,7 +45,7 @@ class WatchTests(unittest.TestCase):
     def test_the_house_normal_is_learned_and_never_alerts(self):
         for t in range(0, 1200, 10):
             self.heard(t, "AA", "BB")
-        self.assertEqual(self.w.normal, {"findmy": 2})
+        self.assertEqual(self.w.normal, {"tile": 2})
         self.assertEqual(self.w.alerts, [])
 
     def test_a_newcomer_lingering_past_the_normal_alerts_once(self):
@@ -57,7 +58,7 @@ class WatchTests(unittest.TestCase):
             self.heard(t, "AA", "CC")
         self.assertEqual(len(self.w.alerts), 1)
         a = self.w.alerts[0]
-        self.assertEqual((a["kind"], a["count"], a["normal"]), ("findmy", 2, 1))
+        self.assertEqual((a["kind"], a["count"], a["normal"]), ("tile", 2, 1))
 
     def test_a_passer_by_does_not_alert(self):
         for t in range(0, 600, 10):
@@ -97,6 +98,48 @@ class WatchTests(unittest.TestCase):
         self.assertNotIn(self.w._key("F0:12:34:56:78:9A"), state)
 
 
+NEAR, AWAY = {"mode": "near its owner"}, {"mode": "away from its owner"}
+
+
+class OwnerTests(unittest.TestCase):
+    """A tracker near its owner is with someone in the room."""
+
+    def heard(self, w, t, near=(), away=(), kind="tile"):
+        for a in near:
+            w.advert(a, kind, -40, now=t, details=NEAR)
+        for a in away:
+            w.advert(a, kind, -40, now=t, details=AWAY)
+        w.tick(now=t)
+
+    def test_tags_near_their_owner_never_alert(self):
+        w = Watch(learn_seconds=600, linger_seconds=120, gone_seconds=120, started=0)
+        for t in range(0, 600, 10):
+            self.heard(w, t, away=["X"])
+        for t in range(600, 1200, 10):
+            self.heard(w, t, near=["A", "B", "C"], away=["X"])
+        self.assertEqual(w.normal, {"tile": 1})
+        self.assertEqual(w.alerts, [])
+        self.assertEqual(w.get(now=1190)["kinds"][0]["with_owner"], 3)
+        self.assertEqual(panel.bluetooth({**w.get(now=1190), "scanning": True})["headline"]["word"], "ALL CLEAR")
+
+    def test_one_away_from_its_owner_still_alerts(self):
+        w = Watch(learn_seconds=600, linger_seconds=120, gone_seconds=120, started=0)
+        for t in range(0, 600, 10):
+            self.heard(w, t, near=["A"])
+        for t in range(600, 900, 10):
+            self.heard(w, t, near=["A"], away=["STRANGER"])
+        self.assertEqual(len(w.alerts), 1)
+
+    def test_find_my_tags_show_but_never_alert(self):
+        w = Watch(learn_seconds=600, linger_seconds=120, gone_seconds=120, started=0)
+        for t in range(0, 600, 10):
+            self.heard(w, t, kind="findmy")
+        for t in range(600, 1200, 10):
+            self.heard(w, t, away=["S1", "S2", "S3"], kind="findmy")
+        self.assertEqual(w.alerts, [])
+        self.assertEqual(w.get(now=1190)["kinds"][0]["count"], 3)
+
+
 class DescribeTests(unittest.TestCase):
     def test_find_my_battery_and_makers(self):
         d = describe("findmy", None, {0x004C: bytes([0x12, 0x19, 0b10_000000]) + b"\x00" * 22}, [], {})
@@ -117,7 +160,13 @@ class DescribeTests(unittest.TestCase):
         key = bytes(range(30, 52))
         d = describe("findmy", None, {0x004C: bytes([0x12, 0x19, 0]) + key}, [], {})
         self.assertNotIn(key.hex(), json.dumps(d))
-        self.assertEqual(set(d), {"makers", "battery"})
+        self.assertEqual(set(d), {"makers", "battery", "mode"})
+
+    def test_find_my_near_or_away_from_its_owner(self):
+        near = describe("findmy", None, {0x004C: bytes([0x12, 0x02, 0x00, 0x00])}, [], {})
+        away = describe("findmy", None, {0x004C: bytes([0x12, 0x19, 0x10]) + bytes(24)}, [], {})
+        self.assertEqual((near["mode"], away["mode"]), ("near its owner", "away from its owner"))
+        self.assertNotIn("mode", describe("findmy", None, {0x004C: bytes([0x12, 0x07, 0x00])}, [], {}))
 
 
 class DeviceDetailTests(unittest.TestCase):

@@ -14,6 +14,10 @@ Households are full of trackers, so the first `learn_seconds` learn the
 normal count of each kind; an alert is a kind above its normal count for
 `linger_seconds`. Alerts count only devices heard in the last
 `present_seconds`; the view keeps counting one for `gone_seconds`.
+
+A tracker near its owner (a Find My tag's short advert, a Google tag's
+frame 0x40) is with someone in the room, not following anyone: it shows,
+but never counts towards an alert.
 """
 
 from __future__ import annotations
@@ -46,7 +50,7 @@ class Kind:
 KINDS = {
     k.key: k
     for k in (
-        Kind("findmy", "Apple Find My tag", "high"),
+        Kind("findmy", "Apple Find My tag", "low"),  # shows, never alerts: see the README
         Kind("smarttag", "Samsung SmartTag", "high"),
         Kind("tile", "Tile tracker", "high"),
         Kind("googletag", "Google Find My tag", "medium"),
@@ -146,6 +150,10 @@ SERVICES = {
 UUID_BASE = "-0000-1000-8000-00805f9b34fb"
 # Find My's status byte: the top two bits are the battery level (OpenHaystack's notes).
 BATTERY = ("full", "medium", "low", "critically low")
+# Find My's length byte: 0x02 is the short advert of a device near its owner
+# ("nearby"), 0x19 the full public key of one away from it ("separated").
+FINDMY_NEAR, FINDMY_AWAY = 0x02, 0x19
+NEAR, AWAY = "near its owner", "away from its owner"
 
 
 def service_label(uuid: str) -> str:
@@ -179,10 +187,12 @@ def describe(
     apple = manufacturer.get(APPLE) or b""
     if kind == "findmy" and len(apple) > 2:
         d["battery"] = BATTERY[apple[2] >> 6 & 3]
+        if apple[1] in (FINDMY_NEAR, FINDMY_AWAY):
+            d["mode"] = NEAR if apple[1] == FINDMY_NEAR else AWAY
     fmdn = service_data.get(uuid16(0xFEAA)) or b""
     if kind == "googletag" and fmdn:
         # Frame 0x41: unwanted-tracking protection mode, i.e. away from its owner.
-        d["mode"] = "away from its owner" if fmdn[0] == 0x41 else "near its owner"
+        d["mode"] = AWAY if fmdn[0] == 0x41 else NEAR
     return d
 
 
@@ -198,6 +208,10 @@ class Sighting:
     rssi_max: int = 0
     address_type: str = ""
     details: dict = field(default_factory=dict)
+
+    @property
+    def with_owner(self) -> bool:
+        return self.details.get("mode") == NEAR
 
     def __post_init__(self):
         self.rssi_min = self.rssi_max = self.rssi
@@ -275,7 +289,8 @@ class Watch:
             }
             nearby = {k: v for k, v in nearby.items() if v}
             learning = now - self.started < self.learn_seconds
-            for kind, devs in nearby.items():
+            for kind, everyone in nearby.items():
+                devs = [d for d in everyone if not d[1].with_owner]
                 if learning:
                     self.normal[kind] = max(self.normal.get(kind, 0), len(devs))
                     continue
@@ -316,6 +331,7 @@ class Watch:
         now = time.time() if now is None else now
         with self._lock:
             nearby = self._nearby(now)
+            owned = {k: sum(s.with_owner for _, s in v) for k, v in nearby.items()}
             return {
                 "learning": max(0, round(self.learn_seconds - (now - self.started))),
                 "error": self.error,
@@ -327,6 +343,7 @@ class Watch:
                         "tracker": k in TRACKERS,
                         "count": len(v),
                         "normal": self.normal.get(k, 0),
+                        "with_owner": owned[k],
                         "closest": max(s.rssi for _, s in v),
                         "devices": [
                             {

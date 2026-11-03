@@ -7,7 +7,8 @@
     python -m overwatch web                a web pod (needs OVERWATCH_SCANNER_URL)
 
 Settings come from the environment: OVERWATCH_PORT (8080), OVERWATCH_LEARN_SECONDS
-(600, scanner), OVERWATCH_WIFI_IFACE (wlmon0), OVERWATCH_WIFI_HOME (the house
+(600, scanner), OVERWATCH_HOME_TAGS (the house's own trackers, `findmy=4`;
+scanner), OVERWATCH_WIFI_IFACE (wlmon0), OVERWATCH_WIFI_HOME (the house
 networks' JSON), OVERWATCH_WIFI_HOME_SHARE (0.6, time on their channels),
 OVERWATCH_UPNP_ROUTER (192.168.1.1), OVERWATCH_UPNP_ALLOW (allowed forwards),
 OVERWATCH_UPNP_INTERVAL (60), and for the web pods OVERWATCH_FEEDS
@@ -43,7 +44,12 @@ def main() -> None:
     brick_observe.init(f"overwatch-{mode or 'cli'}")
     port = int(os.environ.get("OVERWATCH_PORT", "8080"))
     if mode == "scan":
-        scanner.main("0.0.0.0", port, float(os.environ.get("OVERWATCH_LEARN_SECONDS", "600")))
+        scanner.main(
+            "0.0.0.0",
+            port,
+            float(os.environ.get("OVERWATCH_LEARN_SECONDS", "600")),
+            os.environ.get("OVERWATCH_HOME_TAGS", ""),
+        )
     elif mode == "wifi":
         wifi.main(
             "0.0.0.0",

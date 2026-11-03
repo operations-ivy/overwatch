@@ -94,6 +94,23 @@ learns the usual count of each kind. After that, a high or medium kind above
 its usual count for two minutes raises an alert. Only devices heard in the
 last 30 s count towards an alert, so a passer-by doesn't.
 
+A tracker near its owner never counts towards an alert: it's with someone in
+the room, not following anyone (Apple's own unwanted-tracking alerts work the
+same way). A Find My tag says so in its advert's length byte (`0x02`, a short
+"nearby" advert, while its owner's iPhone is close; `0x19`, its full public
+key, once it's been away from it a while), a Google tag in its frame type
+(`0x40` near, `0x41` away). The page shows these as "near their owner".
+
+The house's own tags can't be told apart from a stranger's once they're away
+from their owner (Find My rotates every address and key so nobody can), so
+the scanner's `OVERWATCH_HOME_TAGS` (`KIND=COUNT,...`, `findmy=4` in
+`k8s_config/scanner-deployment.yaml`) says how many the house owns. Up to
+that many away from their owner are usual, less those heard near it: with
+three of the house's four AirTags near the owner's phone, a second tag away
+from its owner alerts; with the owner out and all four away, nothing does.
+A tag only counts where the scanner's radio hears it (brick666): one next to
+another node is just a weak signal.
+
 ## The page
 
 Laid out like wigle-console and the chuck reader (same palette and fonts),

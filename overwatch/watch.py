@@ -14,6 +14,13 @@ Households are full of trackers, so the first `learn_seconds` learn the
 normal count of each kind; an alert is a kind above its normal count for
 `linger_seconds`. Alerts count only devices heard in the last
 `present_seconds`; the view keeps counting one for `gone_seconds`.
+
+A tracker near its owner (a Find My tag's short advert, a Google tag's
+frame 0x40) is with someone in the room, not following anyone: it shows,
+but never counts towards an alert. `home` is how many of a kind the house
+owns (`OVERWATCH_HOME_TAGS`, e.g. "findmy=4"): the house's own tags away
+from their owner are usual too, so up to `home` minus those near their
+owner never alert.
 """
 
 from __future__ import annotations
@@ -146,6 +153,25 @@ SERVICES = {
 UUID_BASE = "-0000-1000-8000-00805f9b34fb"
 # Find My's status byte: the top two bits are the battery level (OpenHaystack's notes).
 BATTERY = ("full", "medium", "low", "critically low")
+# Find My's length byte: 0x02 is the short advert of a device near its owner
+# ("nearby"), 0x19 the full public key of one away from it ("separated").
+FINDMY_NEAR, FINDMY_AWAY = 0x02, 0x19
+NEAR, AWAY = "near its owner", "away from its owner"
+
+
+def parse_home(text: str) -> dict[str, int]:
+    """OVERWATCH_HOME_TAGS: comma-separated KIND=COUNT, the trackers the house
+    owns. Empty: none."""
+    home: dict[str, int] = {}
+    for item in (i.strip() for i in text.split(",")):
+        if not item:
+            continue
+        kind, _, count = item.partition("=")
+        kind = kind.strip()
+        if kind not in KINDS or not count.strip().isdigit():
+            raise ValueError(f"OVERWATCH_HOME_TAGS: {item!r} isn't KIND=COUNT with a known kind")
+        home[kind] = int(count)
+    return home
 
 
 def service_label(uuid: str) -> str:
@@ -179,10 +205,12 @@ def describe(
     apple = manufacturer.get(APPLE) or b""
     if kind == "findmy" and len(apple) > 2:
         d["battery"] = BATTERY[apple[2] >> 6 & 3]
+        if apple[1] in (FINDMY_NEAR, FINDMY_AWAY):
+            d["mode"] = NEAR if apple[1] == FINDMY_NEAR else AWAY
     fmdn = service_data.get(uuid16(0xFEAA)) or b""
     if kind == "googletag" and fmdn:
         # Frame 0x41: unwanted-tracking protection mode, i.e. away from its owner.
-        d["mode"] = "away from its owner" if fmdn[0] == 0x41 else "near its owner"
+        d["mode"] = AWAY if fmdn[0] == 0x41 else NEAR
     return d
 
 
@@ -199,6 +227,10 @@ class Sighting:
     address_type: str = ""
     details: dict = field(default_factory=dict)
 
+    @property
+    def with_owner(self) -> bool:
+        return self.details.get("mode") == NEAR
+
     def __post_init__(self):
         self.rssi_min = self.rssi_max = self.rssi
 
@@ -211,9 +243,11 @@ class Watch:
         gone_seconds: float = 120,
         present_seconds: float = 30,
         started: float | None = None,
+        home: dict[str, int] | None = None,
     ):
         self.learn_seconds, self.linger_seconds, self.gone_seconds = learn_seconds, linger_seconds, gone_seconds
         self.present_seconds = present_seconds
+        self.home = dict(home or {})
         self.started = time.time() if started is None else started
         self.salt = os.urandom(16)
         self.devices: dict[str, Sighting] = {}
@@ -275,11 +309,12 @@ class Watch:
             }
             nearby = {k: v for k, v in nearby.items() if v}
             learning = now - self.started < self.learn_seconds
-            for kind, devs in nearby.items():
+            for kind, everyone in nearby.items():
+                devs = [d for d in everyone if not d[1].with_owner]
                 if learning:
                     self.normal[kind] = max(self.normal.get(kind, 0), len(devs))
                     continue
-                if KINDS[kind].confidence == "low" or len(devs) <= self.normal.get(kind, 0):
+                if KINDS[kind].confidence == "low" or len(devs) <= self._usual(kind, len(everyone) - len(devs)):
                     self.over_since.pop(kind, None)
                     continue
                 since = self.over_since.setdefault(kind, now)
@@ -296,7 +331,7 @@ class Watch:
                                 "confidence": KINDS[kind].confidence,
                                 "at": now,
                                 "count": len(devs),
-                                "normal": self.normal.get(kind, 0),
+                                "normal": self._usual(kind, len(everyone) - len(devs)),
                                 "rssi": newest.rssi,
                                 **tracing.carried(),
                             }
@@ -307,6 +342,11 @@ class Watch:
                     del self.over_since[kind]
             self.alerts = [a for a in self.alerts if now - a["at"] < 1800]
 
+    def _usual(self, kind: str, with_owner: int) -> int:
+        """How many of a kind away from their owner are usual: the learned
+        count, or the house's own not accounted for by those near their owner."""
+        return max(self.normal.get(kind, 0), self.home.get(kind, 0) - with_owner)
+
     def panel(self, st: dict) -> dict:
         """This feed in the page's common shape (panel.py)."""
         from . import panel
@@ -316,6 +356,7 @@ class Watch:
         now = time.time() if now is None else now
         with self._lock:
             nearby = self._nearby(now)
+            owned = {k: sum(s.with_owner for _, s in v) for k, v in nearby.items()}
             return {
                 "learning": max(0, round(self.learn_seconds - (now - self.started))),
                 "error": self.error,
@@ -327,6 +368,9 @@ class Watch:
                         "tracker": k in TRACKERS,
                         "count": len(v),
                         "normal": self.normal.get(k, 0),
+                        "with_owner": owned[k],
+                        "usual": self._usual(k, owned[k]),
+                        "home": self.home.get(k, 0),
                         "closest": max(s.rssi for _, s in v),
                         "devices": [
                             {

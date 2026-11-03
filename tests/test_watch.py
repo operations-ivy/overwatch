@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 import unittest
 
-from overwatch.watch import Watch, classify, describe, uuid16
+from overwatch import panel
+from overwatch.watch import Watch, classify, describe, parse_home, uuid16
 
 
 class ClassifyTests(unittest.TestCase):
@@ -97,6 +98,67 @@ class WatchTests(unittest.TestCase):
         self.assertNotIn(self.w._key("F0:12:34:56:78:9A"), state)
 
 
+NEAR, AWAY = {"mode": "near its owner"}, {"mode": "away from its owner"}
+
+
+class HomeTagTests(unittest.TestCase):
+    """The house owns 4 AirTags; a tag near its owner is with someone here."""
+
+    def watch(self, home=None):
+        return Watch(learn_seconds=600, linger_seconds=120, gone_seconds=120, started=0, home=home)
+
+    def heard(self, w, t, near=(), away=()):
+        for a in near:
+            w.advert(a, "findmy", -40, now=t, details=NEAR)
+        for a in away:
+            w.advert(a, "findmy", -40, now=t, details=AWAY)
+        w.tick(now=t)
+
+    def test_tags_near_their_owner_never_alert(self):
+        w = self.watch()
+        for t in range(0, 600, 10):
+            self.heard(w, t, away=["X"])
+        for t in range(600, 1200, 10):
+            self.heard(w, t, near=["A", "B", "C"], away=["X"])
+        self.assertEqual(w.normal, {"findmy": 1})
+        self.assertEqual(w.alerts, [])
+        k = w.get(now=1190)["kinds"][0]
+        self.assertEqual((k["count"], k["with_owner"], k["usual"]), (4, 3, 1))
+        self.assertEqual(panel.bluetooth({**w.get(now=1190), "scanning": True})["headline"]["word"], "ALL CLEAR")
+
+    def test_the_house_tags_away_from_their_owner_are_usual(self):
+        w = self.watch({"findmy": 4})
+        for t in range(0, 600, 10):
+            self.heard(w, t, near=["A", "B", "C"], away=["X"])  # learned: 1 away
+        for t in range(600, 1800, 10):
+            self.heard(w, t, away=["A2", "B2", "C2", "X"])  # the owner went out: all 4 separated
+        self.assertEqual(w.alerts, [])
+
+    def test_a_stranger_tag_still_alerts_while_the_owner_is_home(self):
+        w = self.watch({"findmy": 4})
+        for t in range(0, 600, 10):
+            self.heard(w, t, near=["A", "B", "C"], away=["X"])
+        for t in range(600, 900, 10):
+            self.heard(w, t, near=["A", "B", "C"], away=["X", "STRANGER"])
+        self.assertEqual(len(w.alerts), 1)
+        self.assertEqual((w.alerts[0]["count"], w.alerts[0]["normal"]), (2, 1))
+
+    def test_more_than_the_house_owns_alerts(self):
+        w = self.watch({"findmy": 4})
+        for t in range(0, 600, 10):
+            self.heard(w, t, away=["X"])
+        for t in range(600, 900, 10):
+            self.heard(w, t, away=["A", "B", "C", "X", "STRANGER"])
+        self.assertEqual(len(w.alerts), 1)
+
+    def test_parse_home(self):
+        self.assertEqual(parse_home(" findmy=4, tile=1 "), {"findmy": 4, "tile": 1})
+        self.assertEqual(parse_home(""), {})
+        for bad in ("findmy", "airtag=4", "findmy=four"):
+            with self.assertRaises(ValueError):
+                parse_home(bad)
+
+
 class DescribeTests(unittest.TestCase):
     def test_find_my_battery_and_makers(self):
         d = describe("findmy", None, {0x004C: bytes([0x12, 0x19, 0b10_000000]) + b"\x00" * 22}, [], {})
@@ -117,7 +179,13 @@ class DescribeTests(unittest.TestCase):
         key = bytes(range(30, 52))
         d = describe("findmy", None, {0x004C: bytes([0x12, 0x19, 0]) + key}, [], {})
         self.assertNotIn(key.hex(), json.dumps(d))
-        self.assertEqual(set(d), {"makers", "battery"})
+        self.assertEqual(set(d), {"makers", "battery", "mode"})
+
+    def test_find_my_near_or_away_from_its_owner(self):
+        near = describe("findmy", None, {0x004C: bytes([0x12, 0x02, 0x00, 0x00])}, [], {})
+        away = describe("findmy", None, {0x004C: bytes([0x12, 0x19, 0x10]) + bytes(24)}, [], {})
+        self.assertEqual((near["mode"], away["mode"]), ("near its owner", "away from its owner"))
+        self.assertNotIn("mode", describe("findmy", None, {0x004C: bytes([0x12, 0x07, 0x00])}, [], {}))
 
 
 class DeviceDetailTests(unittest.TestCase):
